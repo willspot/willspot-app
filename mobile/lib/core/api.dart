@@ -41,7 +41,10 @@ class MemoryTokenStore implements TokenStore {
 }
 
 class ApiClient {
-  ApiClient({required this.baseUrl, required this.tokens, http.Client? client}) : _http = client ?? http.Client();
+  ApiClient({required this.baseUrl, required this.tokens, http.Client? client, this.headerProvider}) : _http = client ?? http.Client();
+
+  /// Extra headers on every request (device-integrity signals).
+  final Future<Map<String, String>> Function()? headerProvider;
 
   final String baseUrl;
   final TokenStore tokens;
@@ -59,6 +62,7 @@ class ApiClient {
         'accept': 'application/json',
         if (body != null) 'content-type': 'application/json',
         if (accessToken != null) 'authorization': 'Bearer $accessToken',
+        ...?(headerProvider == null ? null : await headerProvider!()),
         ...?headers,
       });
     if (body != null) req.body = jsonEncode(body);

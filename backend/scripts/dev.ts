@@ -15,7 +15,7 @@ for (const line of readFileSync(`${root}.env`, "utf8").split("\n")) {
   if (m) env[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
 }
 
-for (const key of ["IDENTITY", "WALLET", "TRADE", "CONFIG", "GIFTCARDS", "BILLS"]) {
+for (const key of ["IDENTITY", "WALLET", "TRADE", "CONFIG", "GIFTCARDS", "BILLS", "RISK"]) {
   const url = new URL(env[`${key}_DATABASE_URL`]!);
   const name = url.pathname.slice(1);
   url.pathname = "/postgres";
@@ -26,8 +26,8 @@ for (const key of ["IDENTITY", "WALLET", "TRADE", "CONFIG", "GIFTCARDS", "BILLS"
   await c.end();
 }
 
-const services: [string, number][] = [["config", 4004], ["identity", 4001], ["wallet", 4002], ["trade", 4003], ["giftcards", 4005], ["bills", 4006], ["gateway", 8080]];
-const colors = [36, 35, 33, 32, 31, 37, 34];
+const services: [string, number][] = [["config", 4004], ["identity", 4001], ["wallet", 4002], ["trade", 4003], ["giftcards", 4005], ["bills", 4006], ["risk", 4007], ["gateway", 8080]];
+const colors = [36, 35, 33, 32, 31, 37, 91, 34];
 for (const [i, [name, port]] of services.entries()) {
   const p = spawn(process.execPath, ["--import", "tsx", `services/${name}/src/server.ts`], { cwd: root, env: { ...env, PORT: String(port) } });
   const tag = `\x1b[${colors[i]}m${name.padEnd(8)}\x1b[0m`;

@@ -1,4 +1,4 @@
-import { FieldCipher, FlagsClient, callInternal, createPool, loadVerifier } from "@willspot/common";
+import { FieldCipher, FlagsClient, RiskClient, callInternal, createPool, loadVerifier } from "@willspot/common";
 import { buildGiftcards } from "./app.js";
 
 const env = (k: string, d?: string) => {
@@ -23,6 +23,7 @@ const app = await buildGiftcards({
   users: { get: (id) => callInternal(identity, "GET", `/internal/users/${id}`) },
   flags: new FlagsClient(config),
   cipher: new FieldCipher(env("GIFTCARD_CODE_KEY")),
+  risk: new RiskClient(process.env.RISK_INTERNAL_URL ? { baseUrl: process.env.RISK_INTERNAL_URL, service: "giftcards", token } : null),
 });
 
 await app.listen({ host: env("HOST", "0.0.0.0"), port: Number(env("PORT", "4005")) });

@@ -14,6 +14,7 @@ const app = await buildGateway({
     config: env("CONFIG_INTERNAL_URL", "http://localhost:4004"),
     giftcards: env("GIFTCARDS_INTERNAL_URL", "http://localhost:4005"),
     bills: env("BILLS_INTERNAL_URL", "http://localhost:4006"),
+    risk: env("RISK_INTERNAL_URL", "http://localhost:4007"),
   },
   corsOrigins: env("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001").split(",").map((s) => s.trim()).filter(Boolean),
   redisUrl: process.env.REDIS_URL || undefined,

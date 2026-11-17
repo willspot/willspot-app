@@ -20,6 +20,7 @@ x-service: &service
     CONFIG_INTERNAL_URL: http://config:4004
     GIFTCARDS_INTERNAL_URL: http://giftcards:4005
     BILLS_INTERNAL_URL: http://bills:4006
+    RISK_INTERNAL_URL: http://risk:4007
     REDIS_URL: redis://redis:6379
     IDENTITY_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_identity
     WALLET_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_wallet
@@ -27,6 +28,7 @@ x-service: &service
     CONFIG_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_config
     GIFTCARDS_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_giftcards
     BILLS_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_bills
+    RISK_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_risk
   depends_on:
     postgres:
       condition: service_healthy
@@ -67,6 +69,11 @@ services:
     build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: bills } }
     environment: { <<: *common-env, PORT: "4006" }
 
+  risk:
+    <<: *service
+    build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: risk } }
+    environment: { <<: *common-env, PORT: "4007" }
+
   config:
     <<: *service
     build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: config } }
@@ -91,7 +98,7 @@ services:
     <<: *service
     build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: gateway } }
     environment: { <<: *common-env, PORT: "8080" }
-    depends_on: [identity, wallet, trade, config, giftcards, bills, redis]
+    depends_on: [identity, wallet, trade, config, giftcards, bills, risk, redis]
     ports: ["8080:8080"]
     networks: [internal, edge]
 

@@ -60,3 +60,15 @@ TOTP (RFC 6238, SHA-1, 30 s, ±1 step) implemented in `@willspot/common` with no
 
 ## ADR-016 — Trade settlement retry instead of failing on transport errors (2026-11-17)
 When the wallet can't be reached mid-trade, the order/conversion is stored as `pending_settlement` (HTTP 202) and a retrier re-posts every 15 s with the same idempotency key. Business refusals (insufficient funds) stay final. A full outbox/event bus is still possible later; this closes the phase-1 gap without one.
+
+## ADR-017 — Real providers behind the existing adapter interfaces, off by default (2026-11-17)
+Paystack, Dojah, Termii and VTpass are selected by env (`BANK_PROVIDER`, `KYC_PROVIDER`, `OTP_MODE`, `BILL_PROVIDER`). Without keys nothing changes. Adapters were written only against vendor documentation (sources and unverified details in PROVIDERS.md). Where official docs could not be read in full (Reloadly, Quidax, Fincra), no adapter was written.
+
+## ADR-018 — Webhooks are hints; provider verify APIs are the source of truth (2026-11-17)
+A bank webhook only tells the wallet which reference to look at. The wallet calls Paystack's `/transaction/verify` or `/transfer/verify` and acts on that answer. A spoofed, replayed or misnamed event can't credit money, and webhook event-name details (not in Paystack's spec) don't matter. Unknown payout outcomes stay `processing` and are polled. They are never auto-refunded.
+
+## ADR-019 — Central risk screening before money moves (2026-11-17)
+A separate risk service screens every movement (synchronous, serialised per user with an advisory lock) and returns allow, review or block. Holds block money out and never block money in. Money out fails closed if risk is unreachable; deposits and conversions fail open and are logged. Report exports are drafts until counsel confirms NFIU's format.
+
+## ADR-020 — Device signals are hints, pinning is opt-in (2026-11-17)
+Root/jailbreak/emulator/debugger checks run natively and are sent as `x-device-signals`. They are trivially spoofable, so they feed risk scoring only. Play Integrity and App Attest are the stronger follow-ups. Certificate pinning is enabled per build (`PIN_CERTS=true`) with bundled PEMs, and the app refuses to start if pinning is on without them.

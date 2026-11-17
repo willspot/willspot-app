@@ -1,6 +1,6 @@
 import { FieldCipher, FlagsClient, createPool, loadIssuer, loadVerifier } from "@willspot/common";
 import { buildIdentity, seedAdmin } from "./app.js";
-import { SandboxKycProvider, SandboxOtpSender } from "./providers.js";
+import { DojahKycProvider, SandboxKycProvider, SandboxOtpSender, TermiiOtpSender, type KycProvider, type OtpSender } from "./providers.js";
 
 const env = (k: string, d?: string) => {
   const v = process.env[k] ?? d;
@@ -17,19 +17,30 @@ if (production && process.env.ADMIN_REQUIRE_MFA !== "1") {
   throw new Error("Refusing to start: set ADMIN_REQUIRE_MFA=1 in production (admins must use two-factor sign-in)");
 }
 
+const otpMode = env("OTP_MODE", "sandbox");
+const otp: OtpSender = otpMode === "termii" ? new TermiiOtpSender(env("TERMII_API_KEY"), env("TERMII_SENDER_ID"), env("TERMII_BASE_URL")) : new SandboxOtpSender();
+const kyc: KycProvider =
+  env("KYC_PROVIDER", "sandbox") === "dojah"
+    ? new DojahKycProvider(env("DOJAH_APP_ID"), env("DOJAH_SECRET_KEY"), { baseUrl: process.env.DOJAH_BASE_URL || undefined })
+    : new SandboxKycProvider();
+if (production && (otp instanceof SandboxOtpSender || kyc instanceof SandboxKycProvider) && process.env.ALLOW_SANDBOX_IN_PRODUCTION !== "1") {
+  throw new Error("Refusing to start: sandbox OTP or KYC provider in production");
+}
+
 const db = createPool(env("IDENTITY_DATABASE_URL"));
 const app = await buildIdentity({
   db,
   issuer: await loadIssuer(env("JWT_PRIVATE_KEY")),
   verifier: await loadVerifier(env("JWT_PUBLIC_KEY")),
-  otp: new SandboxOtpSender(),
-  kyc: new SandboxKycProvider(),
+  otp,
+  kyc,
   exposeDevOtp,
   serviceTokens: {
     wallet: process.env.SERVICE_TOKEN_WALLET,
     trade: process.env.SERVICE_TOKEN_TRADE,
     giftcards: process.env.SERVICE_TOKEN_GIFTCARDS,
     bills: process.env.SERVICE_TOKEN_BILLS,
+    risk: process.env.SERVICE_TOKEN_RISK,
   },
   cipher: process.env.IDENTITY_FIELD_KEY ? new FieldCipher(process.env.IDENTITY_FIELD_KEY) : undefined,
   flags: new FlagsClient(

@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   AppError,
   FlagsClient,
+  RiskClient,
+  deviceSignals,
   TokenVerifier,
   amountSchema,
   authenticate,
@@ -31,8 +33,9 @@ export interface BillsDeps {
   verifier: TokenVerifier;
   ledger: LedgerClient;
   provider: BillProvider;
-  users: { get(userId: string): Promise<{ status: string; kycTier: number }> };
+  users: { get(userId: string): Promise<{ status: string; kycTier: number; phone?: string }> };
   flags: FlagsClient;
+  risk?: RiskClient;
   logger?: boolean;
 }
 
@@ -58,8 +61,9 @@ export async function buildBills(deps: BillsDeps) {
   const app = await createApp("bills", { logger: deps.logger });
   const auth = authenticate(deps.verifier);
 
-  const biller = (id: string) => {
-    const b = BILLERS.find((x) => x.id === id);
+  const catalogue = async () => (provider.catalogue ? provider.catalogue() : BILLERS);
+  const biller = async (id: string) => {
+    const b = (await catalogue()).find((x) => x.id === id);
     if (!b) throw notFound("Unknown biller");
     return b;
   };
@@ -69,13 +73,13 @@ export async function buildBills(deps: BillsDeps) {
 
   app.get("/v1/bills/billers", async () => {
     await deps.flags.require("bill_payments");
-    return { items: BILLERS, sandbox: true };
+    return { items: await catalogue(), sandbox: provider.name === "sandbox" };
   });
 
   app.post("/v1/bills/validate", { preHandler: auth }, async (req) => {
     await deps.flags.require("bill_payments");
     const b = parse(z.object({ billerId: z.string().max(40), customerId: z.string().trim().max(20) }), req.body);
-    const bl = biller(b.billerId);
+    const bl = await biller(b.billerId);
     checkCustomer(bl, b.customerId);
     const r = await provider.validate(bl, b.customerId);
     if (!r) throw notFound(`We couldn't find that ${bl.customerLabel.toLowerCase()}`);
@@ -98,7 +102,7 @@ export async function buildBills(deps: BillsDeps) {
     if (u.status !== "active") throw forbidden("Account is not active");
     if (u.kycTier < 1) throw new AppError(403, "kyc_required", "Verify your BVN to pay bills");
 
-    const bl = biller(b.billerId);
+    const bl = await biller(b.billerId);
     checkCustomer(bl, b.customerId);
     let amount: bigint;
     if (bl.products) {
@@ -110,6 +114,7 @@ export async function buildBills(deps: BillsDeps) {
       amount = toMinor(b.amount, "NGN");
       if (amount < BigInt(bl.min! * 100) || amount > BigInt(bl.max! * 100)) throw badRequest("bad_amount", `Amount must be between ₦${bl.min} and ₦${bl.max}`);
     }
+    await deps.risk?.check({ userId: me.id, kind: "bill", amountNgn: fromMinor(amount, "NGN"), device: deviceSignals(req), meta: { biller: bl.id } });
     const customer = bl.needsValidation ? await provider.validate(bl, b.customerId) : null;
     if (bl.needsValidation && !customer) throw notFound(`We couldn't find that ${bl.customerLabel.toLowerCase()}`);
 
@@ -147,7 +152,15 @@ export async function buildBills(deps: BillsDeps) {
     }
 
     // 2. Vend with the biller; refund in full if it fails.
-    const v = await provider.vend({ reference: p.id, biller: bl, customerId: b.customerId, amountNgn: fromMinor(amount, "NGN") }).catch(() => ({ status: "failed" as const, providerRef: "", reason: "Biller unreachable", token: undefined }));
+    // An exception here means we don't know whether the biller vended: keep it processing and requery, never auto-refund.
+    const v = await provider
+      .vend({ reference: p.id, biller: bl, customerId: b.customerId, amountNgn: fromMinor(amount, "NGN"), productId: b.productId, phone: u.phone })
+      .catch(() => ({ status: "processing" as const, providerRef: "", reason: undefined, token: undefined }));
+    if (v.status === "processing") {
+      const pending = await db.query("UPDATE payments SET journal_id=$2, provider_ref=$3, updated_at=now() WHERE id=$1 RETURNING *", [p.id, journalId, v.providerRef || null]);
+      reply.status(202);
+      return view(pending.rows[0]);
+    }
     if (v.status === "completed") {
       const done = await db.query("UPDATE payments SET status='completed', journal_id=$2, token=$3, provider_ref=$4, updated_at=now() WHERE id=$1 RETURNING *", [p.id, journalId, v.token ?? null, v.providerRef]);
       reply.status(201);
@@ -169,6 +182,15 @@ export async function buildBills(deps: BillsDeps) {
     return view(failed.rows[0]);
   });
 
+  app.get("/v1/admin/bills/health", { preHandler: [auth, requireAdmin] }, async () => {
+    const r = await db.query<{ n: string; oldest: Date | null }>("SELECT count(*) AS n, min(created_at) AS oldest FROM payments WHERE status='processing'");
+    const oldest = r.rows[0]!.oldest;
+    return { processing: Number(r.rows[0]!.n), oldestProcessingMinutes: oldest ? Math.round((Date.now() - oldest.getTime()) / 60_000) : 0 };
+  });
+
+  /** Admin: run the requery job now (it also runs on a timer in production). */
+  app.post("/v1/admin/bills/requery", { preHandler: [auth, requireAdmin] }, async () => ({ settled: await requeryPending(db, provider, deps.ledger) }));
+
   app.get("/v1/bills/payments", { preHandler: auth }, async (req) => {
     const r = await db.query("SELECT * FROM payments WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50", [currentUser(req).id]);
     return { items: r.rows.map(view) };
@@ -181,4 +203,40 @@ export async function buildBills(deps: BillsDeps) {
   });
 
   return app;
+}
+
+/**
+ * Finishes payments left "processing" (biller timeout or pending). Delivered →
+ * completed; failed → full refund (idempotent journal key); still pending → retry later.
+ */
+export async function requeryPending(db: Db, provider: BillProvider, ledger: LedgerClient): Promise<number> {
+  if (!provider.requery) return 0;
+  const rows = (await db.query("SELECT * FROM payments WHERE status='processing' AND provider_ref IS NOT NULL AND updated_at < now() - interval '30 seconds' ORDER BY updated_at LIMIT 25")).rows;
+  let done = 0;
+  for (const p of rows) {
+    const r = await provider.requery(p.provider_ref);
+    if (r.status === "processing") {
+      await db.query("UPDATE payments SET updated_at=now() WHERE id=$1", [p.id]);
+      continue;
+    }
+    if (r.status === "completed") {
+      await db.query("UPDATE payments SET status='completed', token=$2, updated_at=now() WHERE id=$1 AND status='processing'", [p.id, r.token ?? null]);
+    } else {
+      const amount = BigInt(p.amount);
+      const rev = await ledger.post({
+        idempotencyKey: `billrev:${p.id}`,
+        type: "bill_refund",
+        userId: p.user_id,
+        description: "Refund: bill payment",
+        meta: { paymentId: p.id, reason: r.reason },
+        legs: [
+          { code: "sys:bills:NGN", asset: "NGN", amount: (-amount).toString() },
+          { code: `user:${p.user_id}:NGN`, asset: "NGN", amount: amount.toString() },
+        ],
+      });
+      await db.query("UPDATE payments SET status='failed', reversal_journal_id=$2, failure=$3, updated_at=now() WHERE id=$1 AND status='processing'", [p.id, rev.journalId, r.reason ?? "Payment failed"]);
+    }
+    done++;
+  }
+  return done;
 }

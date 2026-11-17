@@ -116,6 +116,23 @@ if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
   const latest = (await call("GET", "/v1/wallet/transactions?limit=1", undefined, token)).json.items[0];
   const receipt = await call("GET", `/v1/wallet/transactions/${latest.id}`, undefined, token);
   check("receipt available", /^WS-/.test(receipt.json.reference ?? ""), receipt.json);
+
+  // ---------- Phase 3: AML screening and ops ----------
+  await call("POST", "/v1/sandbox/deposits", { amount: "500000" }, token);
+  const big = await call("POST", "/v1/wallet/withdrawals", { amount: "300000", bankCode: "SBX001", accountNumber: "0123456789", idempotencyKey: randomUUID() }, token, { "x-step-up": await step("withdraw") });
+  check("risk: new account's large withdrawal is held for review", big.status === 403 && big.json.error?.code === "risk_review", big.json);
+  const holds = await call("GET", "/v1/admin/risk/holds", undefined, at);
+  const held = holds.json.items?.some((h: { user_id: string }) => h.user_id === su.json.userId);
+  check("risk: hold visible to admins", held, holds.json);
+  const rel = await call("POST", `/v1/admin/risk/holds/${su.json.userId}/release`, { reason: "Smoke test: source of funds verified" }, at);
+  check("risk: admin releases the hold", rel.status === 200, rel.json);
+  const alerts = await call("GET", `/v1/admin/risk/alerts?userId=${su.json.userId}`, undefined, at);
+  check("risk: alerts recorded for the user", (alerts.json.items?.length ?? 0) >= 1, alerts.json);
+  const rec = await call("GET", "/v1/admin/wallet/reconcile", undefined, at);
+  check("ops: ledger reconciles (every asset nets to zero)", rec.json.ok === true, rec.json);
+  const th = await call("GET", "/v1/admin/trade/health", undefined, at);
+  const bh = await call("GET", "/v1/admin/bills/health", undefined, at);
+  check("ops: trade and bills health endpoints", th.status === 200 && bh.status === 200, { th: th.json, bh: bh.json });
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll smoke checks passed");

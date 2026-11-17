@@ -4,6 +4,8 @@ import {
   ASSETS,
   AppError,
   FlagsClient,
+  RiskClient,
+  deviceSignals,
   TokenVerifier,
   amountSchema,
   authenticate,
@@ -46,6 +48,7 @@ export interface TradeDeps {
   ledger: LedgerClient;
   users: { get(userId: string): Promise<{ status: string; kycTier: number }> };
   flags: FlagsClient;
+  risk?: RiskClient;
   quoteTtlSeconds?: number;
   logger?: boolean;
 }
@@ -194,6 +197,7 @@ export async function buildTrade(deps: TradeDeps) {
     const ngn = BigInt(q.ngn_amount);
     const units = BigInt(q.asset_amount);
     const buy = q.side === "buy";
+    await deps.risk?.check({ userId: me.id, kind: "trade", amountNgn: fromMinor(ngn, "NGN"), device: deviceSignals(req), meta: { asset: q.asset, side: q.side } });
     const r = await settle(deps.ledger, {
       idempotencyKey: `quote:${quoteId}`,
       type: buy ? "crypto_buy" : "crypto_sell",
@@ -282,6 +286,8 @@ export async function buildTrade(deps: TradeDeps) {
 
   registerConvert(app, deps, auth);
 
+  app.get("/v1/admin/trade/health", admin, async () => pendingHealth(db));
+
   app.get("/v1/admin/trade/orders", admin, async () => {
     const r = await db.query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 100");
     const vol = await db.query<{ side: string; n: string; ngn: string }>("SELECT side, count(*) AS n, coalesce(sum(ngn_amount),0)::text AS ngn FROM orders WHERE status='completed' GROUP BY side");
@@ -308,4 +314,15 @@ function orderView(o: Record<string, unknown>) {
     failure: o.failure ?? null,
     createdAt: o.created_at,
   };
+}
+
+/** Pending settlements (orders + conversions) and the oldest one's age, for the ops page and alerts. */
+export async function pendingHealth(db: Db) {
+  const r = await db.query<{ n: string; oldest: Date | null }>(
+    `SELECT count(*) AS n, min(updated_at) AS oldest FROM (
+       SELECT updated_at FROM orders WHERE status='pending_settlement'
+       UNION ALL SELECT updated_at FROM conversions WHERE status='pending_settlement') x`,
+  );
+  const oldest = r.rows[0]!.oldest;
+  return { pendingSettlements: Number(r.rows[0]!.n), oldestPendingMinutes: oldest ? Math.round((Date.now() - oldest.getTime()) / 60_000) : 0 };
 }

@@ -4,12 +4,19 @@ import 'package:flutter/services.dart';
 import 'core/api.dart';
 import 'core/app_state.dart';
 import 'core/config.dart';
+import 'core/security.dart';
 import 'features/splash/splash_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-  final state = AppState(ApiClient(baseUrl: AppConfig.apiUrl, tokens: SecureTokenStore()));
+  final client = await Pinning.client(); // fails closed if pinning is on without certificates
+  final state = AppState(ApiClient(
+    baseUrl: AppConfig.apiUrl,
+    tokens: SecureTokenStore(),
+    client: client,
+    headerProvider: () async => {'x-device-signals': await DeviceSignals.header()},
+  ));
   runApp(WillSpotApp(state: state));
 }
 

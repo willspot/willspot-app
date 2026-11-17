@@ -496,7 +496,7 @@ export async function buildIdentity(deps: IdentityDeps) {
     const { id } = parse(z.object({ id: uuidSchema }), req.params);
     const u = await getUser(id);
     if (!u) throw notFound();
-    return { id: u.id, status: u.status, kycTier: u.kyc_tier, firstName: u.first_name, lastName: u.last_name, email: u.email };
+    return { id: u.id, status: u.status, kycTier: u.kyc_tier, firstName: u.first_name, lastName: u.last_name, email: u.email, phone: u.phone };
   });
 
   return app;

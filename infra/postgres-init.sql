@@ -5,3 +5,4 @@ CREATE DATABASE willspot_trade;
 CREATE DATABASE willspot_config;
 CREATE DATABASE willspot_giftcards;
 CREATE DATABASE willspot_bills;
+CREATE DATABASE willspot_risk;

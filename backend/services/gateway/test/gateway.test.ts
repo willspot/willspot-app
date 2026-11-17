@@ -16,7 +16,7 @@ beforeAll(async () => {
   const addr = upstream.server.address() as { port: number };
   const url = `http://127.0.0.1:${addr.port}`;
   gw = await buildGateway({
-    upstreams: { identity: url, wallet: url, trade: url, config: url, giftcards: url, bills: url },
+    upstreams: { identity: url, wallet: url, trade: url, config: url, giftcards: url, bills: url, risk: url },
     corsOrigins: ["https://app.willspot.test"],
     rateLimit: { general: 1000, strict: 3 },
     logger: false,

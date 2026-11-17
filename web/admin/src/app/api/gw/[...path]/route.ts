@@ -28,7 +28,9 @@ async function forward(req: Request, ctx: { params: Promise<{ path: string[] }> 
     if (!fresh) return Response.json({ error: { code: "unauthorized", message: "Please sign in" } }, { status: 401 });
     r = await send(fresh);
   }
-  return new Response(await r.text(), { status: r.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+  const type = r.headers.get("content-type")?.startsWith("text/csv") ? "text/csv; charset=utf-8" : "application/json";
+  const disposition = type.startsWith("text/csv") ? r.headers.get("content-disposition") : null;
+  return new Response(await r.text(), { status: r.status, headers: { "content-type": type, "cache-control": "no-store", ...(disposition ? { "content-disposition": disposition } : {}) } });
 }
 
 export const GET = forward;

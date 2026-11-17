@@ -4,6 +4,8 @@ import {
   ASSETS,
   AppError,
   FlagsClient,
+  RiskClient,
+  deviceSignals,
   TokenVerifier,
   amountSchema,
   authenticate,
@@ -32,12 +34,15 @@ import {
   type Tx,
 } from "@willspot/common";
 import { balancesFor, ensureAccount, postJournal, postJournalTx, sysCode, userCode, type Leg } from "./ledger.js";
-import { SANDBOX_BANKS, type BankProvider } from "./providers.js";
+import { registerOpsRoutes, trackWebhookFailures } from "./ops.js";
+import type { BankProvider } from "./providers.js";
 
 export interface UserInfo {
   status: string;
   kycTier: number;
   firstName: string;
+  email?: string;
+  phone?: string;
   lastName: string;
 }
 
@@ -47,6 +52,10 @@ export interface WalletDeps {
   bank: BankProvider;
   users: { get(userId: string): Promise<UserInfo> };
   flags: FlagsClient;
+  /** AML/fraud screening. Absent in unit tests that don't exercise it. */
+  risk?: RiskClient;
+  /** NGN per USD used only to size USD deposits for risk screening. */
+  riskUsdNgn?: number;
   webhookSecret: string;
   /** Enables POST /v1/sandbox/deposits. Refused at startup in production. */
   sandbox: boolean;
@@ -69,6 +78,7 @@ export async function buildWallet(deps: WalletDeps) {
   const { db, verifier, bank } = deps;
   await migrate(db, MIGRATIONS);
   const app = await createApp("wallet", { logger: deps.logger });
+  trackWebhookFailures(app, db);
   const auth = authenticate(verifier);
   const fee = deps.withdrawFeeMinor ?? 50_00n;
   const limits = deps.dailyWithdrawLimits ?? DEFAULT_LIMITS;
@@ -104,10 +114,10 @@ export async function buildWallet(deps: WalletDeps) {
     if (existing.rowCount) return vaView(existing.rows[0]);
     const name = `WILLSPOT/${u.firstName} ${u.lastName}`.toUpperCase();
     for (let i = 0; i < 5; i++) {
-      const { accountNumber } = await bank.createVirtualAccount(me.id, name);
+      const va = await bank.createVirtualAccount({ userId: me.id, email: u.email ?? "", phone: u.phone ?? "", firstName: u.firstName, lastName: u.lastName, accountName: name });
       const r = await db.query(
-        "INSERT INTO virtual_accounts(user_id, account_number, account_name, bank_name, provider) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING account_number, account_name, bank_name",
-        [me.id, accountNumber, name, bank.bankName, bank.name],
+        "INSERT INTO virtual_accounts(user_id, account_number, account_name, bank_name, provider, provider_customer_ref) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING account_number, account_name, bank_name",
+        [me.id, va.accountNumber, va.accountName ?? name, va.bankName ?? bank.bankName, bank.name, va.customerRef ?? null],
       );
       if (r.rowCount) return vaView(r.rows[0]);
       const again = await db.query("SELECT account_number, account_name, bank_name FROM virtual_accounts WHERE user_id=$1", [me.id]);
@@ -134,7 +144,7 @@ export async function buildWallet(deps: WalletDeps) {
     if (!va) throw notFound("Unknown account number");
     return tx(db, async (c) => {
       const prior = await c.query("SELECT id FROM deposits WHERE provider_ref=$1", [evt.reference]);
-      if (prior.rowCount) return { duplicate: true };
+      if (prior.rowCount) return { duplicate: true, userId: undefined as string | undefined, amount: undefined as bigint | undefined };
       const j = await postJournal(c, {
         idempotencyKey: `dep:${evt.reference}`,
         type: "deposit",
@@ -149,7 +159,14 @@ export async function buildWallet(deps: WalletDeps) {
       await c.query("INSERT INTO deposits(provider_ref, user_id, amount, sender_name, journal_id, currency) VALUES ($1,$2,$3,$4,$5,$6)", [
         evt.reference, va.user_id, amount.toString(), evt.senderName ?? null, j.journalId, cur,
       ]);
-      return { duplicate: false };
+      return { duplicate: false, userId: va.user_id as string | undefined, amount: amount as bigint | undefined };
+    }).then(async (r) => {
+      // Record the inflow for AML monitoring (deposits are never blocked; failures are logged, not fatal).
+      if (!r.duplicate && r.userId && r.amount !== undefined && deps.risk) {
+        const ngnMinor = cur === "USD" ? (r.amount * BigInt(Math.round((deps.riskUsdNgn ?? 1500) * 100))) / 100n : r.amount;
+        await deps.risk.check({ userId: r.userId, kind: "deposit", amountNgn: fromMinor(ngnMinor, "NGN"), meta: { currency: cur, reference: evt.reference } }).catch((e) => app.log.warn({ err: e }, "risk record failed"));
+      }
+      return r;
     });
   }
 
@@ -245,6 +262,48 @@ export async function buildWallet(deps: WalletDeps) {
     return { ok: true, duplicate: r.duplicate };
   });
 
+  /**
+   * Real bank partner webhook (e.g. Paystack). The payload is only a hint: we
+   * check the signature, then ask the provider's verify API what really happened
+   * and act on that answer alone.
+   */
+  if (bank.verifyWebhook) {
+    app.post("/v1/webhooks/bank", async (req, reply) => {
+      if (!bank.verifyWebhook!(req.rawBody ?? "", req.headers)) throw unauthorized("Bad signature");
+      const reference = String((req.body as { data?: { reference?: unknown } })?.data?.reference ?? "");
+      if (!/^[\w.-]{6,100}$/.test(reference)) return reply.status(200).send({ ok: true, ignored: "no reference" });
+
+      const w = (await db.query<{ id: string; status: string }>("SELECT id, status FROM withdrawals WHERE id::text = lower($1)", [reference])).rows[0];
+      if (w) {
+        if (w.status !== "processing" || !bank.verifyPayout) return { ok: true };
+        const st = await bank.verifyPayout(reference);
+        if (st === "completed") await db.query("UPDATE withdrawals SET status='completed', updated_at=now() WHERE id=$1 AND status='processing'", [w.id]);
+        if (st === "failed") await reverseWithdrawal(w.id, "Payout failed at the bank partner");
+        return { ok: true, payout: st };
+      }
+      if (!bank.verifyDeposit) return { ok: true };
+      let d;
+      try {
+        d = await bank.verifyDeposit(reference);
+      } catch (e) {
+        // Provider says no such payment (4xx): acknowledge so it stops retrying. Outages (5xx) → 500 so it retries.
+        if ((e as { httpStatus?: number }).httpStatus && (e as { httpStatus: number }).httpStatus < 500) return { ok: true, ignored: "unknown reference" };
+        throw e;
+      }
+      if (!d.ok || d.currency !== "NGN") return { ok: true, ignored: "not a successful NGN payment" };
+      const va = (
+        await db.query<{ account_number: string }>(
+          "SELECT account_number FROM virtual_accounts WHERE ($1::text IS NOT NULL AND account_number=$1) OR ($2::text IS NOT NULL AND provider_customer_ref=$2) LIMIT 1",
+          [d.receiverAccount ?? null, d.customerRef ?? null],
+        )
+      ).rows[0];
+      if (!va) return { ok: true, ignored: "not one of our virtual accounts" };
+      await deps.flags.require("deposits");
+      const r = await processDeposit({ event: "deposit.succeeded", reference: `${bank.name}:${d.reference}`, accountNumber: va.account_number, amount: fromMinor(d.amountMinor, "NGN"), currency: "NGN" });
+      return { ok: true, duplicate: r.duplicate };
+    });
+  }
+
   if (deps.sandbox) {
     /** Sandbox only: simulates the bank calling our webhook for the caller's own account. */
     app.post("/v1/sandbox/deposits", { preHandler: auth }, async (req) => {
@@ -262,7 +321,7 @@ export async function buildWallet(deps: WalletDeps) {
 
   // ---------- Withdrawals ----------
 
-  app.get("/v1/wallet/banks", async () => ({ banks: SANDBOX_BANKS }));
+  app.get("/v1/wallet/banks", async () => ({ banks: await bank.listBanks() }));
 
   app.post("/v1/wallet/resolve-account", { preHandler: auth }, async (req) => {
     const b = parse(z.object({ bankCode: z.string().max(20), accountNumber: nubanSchema }), req.body);
@@ -298,6 +357,7 @@ export async function buildWallet(deps: WalletDeps) {
     const u = await activeUser(me.id, 1);
     const amount = toMinor(body.amount, "NGN");
     if (amount < 100_00n) throw badRequest("below_minimum", "Minimum withdrawal is 100.00");
+    await deps.risk?.check({ userId: me.id, kind: "withdrawal", amountNgn: fromMinor(amount, "NGN"), device: deviceSignals(req), meta: { bankCode: body.bankCode } });
     const limit = limits[u.kycTier] ?? 0n;
     const resolved = await bank.resolveAccount(body.bankCode, body.accountNumber);
     if (!resolved) throw notFound("Account not found at that bank");
@@ -322,8 +382,12 @@ export async function buildWallet(deps: WalletDeps) {
       ).rows[0]!;
     });
 
-    const payout = await bank.payout({ reference: w.id, bankCode: body.bankCode, accountNumber: body.accountNumber, amountMinor: amount });
-    if (payout.status === "completed") {
+    const payout = await bank
+      .payout({ reference: w.id, bankCode: body.bankCode, accountNumber: body.accountNumber, accountName: resolved.accountName, amountMinor: amount })
+      .catch(() => ({ status: "processing" as const, providerRef: "", reason: undefined })); // unknown outcome: verify later, never auto-refund
+    if (payout.status === "processing") {
+      await db.query("UPDATE withdrawals SET provider_ref=$2, updated_at=now() WHERE id=$1", [w.id, payout.providerRef || null]);
+    } else if (payout.status === "completed") {
       await db.query("UPDATE withdrawals SET status='completed', provider_ref=$2, updated_at=now() WHERE id=$1", [w.id, payout.providerRef]);
     } else {
       await reverseWithdrawal(w.id, payout.reason ?? "Payout failed");
@@ -436,6 +500,8 @@ export async function buildWallet(deps: WalletDeps) {
     };
   });
 
+  registerOpsRoutes(app, db, auth as never);
+  app.decorate("walletJobs", { reverseWithdrawal });
   return app;
 }
 
@@ -476,4 +542,10 @@ async function history(db: Db, userId: string, limit: number, offset: number) {
     createdAt: j.created_at,
     changes: j.legs.map((l) => ({ asset: l.asset, amount: fromMinor(BigInt(l.amount), l.asset) })),
   }));
+}
+
+declare module "fastify" {
+  interface FastifyInstance {
+    walletJobs: { reverseWithdrawal(id: string, reason: string): Promise<void> };
+  }
 }

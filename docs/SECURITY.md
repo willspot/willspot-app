@@ -18,6 +18,9 @@ Mapped to OWASP ASVS 4.0 (backend/web) and MASVS 2 (mobile) categories. Category
 | V11 Business logic | Double-entry ledger with DB-enforced balance and no-overdraft constraints, append-only postings, idempotency keys, daily limits per KYC tier serialised per user, quotes single-use with 30 s expiry | Tested (wallet/trade tests) |
 | V12/V13 API | Webhooks verified with HMAC-SHA256 over the raw body (constant-time compare), idempotent on provider reference; CORS allow-list; rate limits (stricter on auth/KYC) | Tested (gateway, wallet) |
 | V14 Config | No secrets in code; `.env` generated locally (mode 600) and git-ignored; services refuse to start in production with sandbox providers, dev OTP exposure or fast hashing; images run as non-root, read-only, all capabilities dropped | Startup guards not unit-tested |
+| Money-movement screening | Risk service checks every withdrawal, purchase, bill, trade and conversion before money moves; holds block money out; fails closed for outflows if risk is down; per-user lock prevents racing past limits | Tested (rules, holds, concurrency, wallet over HTTP) |
+| Provider webhooks | Signature verified (Paystack HMAC-SHA512), then the payment/payout is re-checked with the provider's verify API; webhook amounts are never trusted; unknown references are ignored; failures logged | Tested with a fake Paystack |
+| Ledger integrity monitoring | Reconciliation (net zero per asset, balances = postings) every 15 min with alerting | Tested (tamper detected) |
 | Admin 2FA | TOTP (RFC 6238) with encrypted secret, replay refusal, lockout counting; `ADMIN_REQUIRE_MFA=1` enforced on every admin route; production refuses to start without it | Tested (RFC vectors + full flow) |
 | Sensitive fields | Gift-card codes and TOTP secrets AES-256-GCM encrypted with per-service keys; codes decrypted only for reviewers, each view audited; duplicate cards refused by hash | Tested |
 | Uploads | Gift-card photos accepted only when the bytes are JPEG/PNG (magic numbers), ≤1.5 MB; SVG and other types refused | Tested |
@@ -32,14 +35,14 @@ Mapped to OWASP ASVS 4.0 (backend/web) and MASVS 2 (mobile) categories. Category
 | STORAGE | Refresh token in Keychain (`first_unlock_this_device`) / Android Keystore via flutter_secure_storage; access token in memory only; `allowBackup=false` | Code review only |
 | CRYPTO | No custom crypto in the app; all signing server-side | — |
 | AUTH | PIN entry on a custom keypad (no keyboard cache); step-up tokens per action | Widget test for keypad |
-| NETWORK | Release: HTTPS only, system CAs; debug: cleartext only to 10.0.2.2/localhost | Config; **pinning not yet added** |
+| NETWORK | Release: HTTPS only; optional certificate pinning (`PIN_CERTS=true` + bundled PEMs, fails closed); debug: cleartext only to 10.0.2.2/localhost | Pinning logic unit-tested; **not run against a real TLS host** |
 | PLATFORM | `FLAG_SECURE` on release builds (no screenshots/recents thumbnails) | Code only (debug builds excluded on purpose) |
 | CODE | CI builds release with `--obfuscate --split-debug-info` | CI config, not run yet |
-| RESILIENCE | Root/jailbreak detection not implemented | **Gap** — phase 3 |
+| RESILIENCE | Root/jailbreak, emulator, debugger signals (Kotlin + Swift) sent with every request and scored by risk rules | Verified on Android emulator (`emulator: true` reached risk); iOS compiled only. Play Integrity / App Attest still to do |
 
 ## Before launch (must-do)
 1. Pin GitHub Actions to commit SHAs and Docker base images to digests.
-2. Certificate pinning in the app; root/jailbreak signals.
+2. ~~Pinning and device signals~~ built; enable pinning with your real certs; add Play Integrity / App Attest.
 3. ~~Admin 2FA~~ done (phase 2); per-admin roles still to do.
 4. ~~Shared rate-limit store~~ wired (verify in staging); WAF in front of the gateway.
 5. Secrets from a secret manager; rotate the dev keys.

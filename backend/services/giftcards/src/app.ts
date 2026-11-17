@@ -5,6 +5,8 @@ import {
   AppError,
   FieldCipher,
   FlagsClient,
+  RiskClient,
+  deviceSignals,
   TokenVerifier,
   authenticate,
   badRequest,
@@ -35,6 +37,7 @@ export interface GiftcardDeps {
   users: { get(userId: string): Promise<{ status: string; kycTier: number }> };
   flags: FlagsClient;
   cipher: FieldCipher;
+  risk?: RiskClient;
   maxSellsPerDay?: number;
   logger?: boolean;
 }
@@ -138,6 +141,7 @@ export async function buildGiftcards(deps: GiftcardDeps) {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *, image IS NOT NULL AS has_image`,
         [me.id, br.id, b.value, br.currency, code ? cipher.encrypt(code) : null, code ? sha256(`${br.id}:${code}`) : null, code ? code.slice(-4) : null, img?.bytes ?? null, img?.type ?? null, rate.toString(), (rate * BigInt(b.value)).toString(), b.idempotencyKey],
       );
+      await deps.risk?.check({ userId: me.id, kind: "giftcard_sell", amountNgn: fromMinor(rate * BigInt(b.value), "NGN"), device: deviceSignals(req), meta: { brand: br.id } }).catch(() => undefined);
       reply.status(201);
       return sellView(t.rows[0]);
     } catch (e) {
@@ -169,6 +173,7 @@ export async function buildGiftcards(deps: GiftcardDeps) {
     if (!br?.buy_enabled) throw badRequest("brand_unavailable", "This card isn't for sale right now");
     if (b.value < br.min_value || b.value > br.max_value) throw badRequest("bad_value", `Card value must be between ${br.min_value} and ${br.max_value}`);
     const cost = BigInt(br.buy_rate) * BigInt(b.value);
+    await deps.risk?.check({ userId: me.id, kind: "giftcard_buy", amountNgn: fromMinor(cost, "NGN"), device: deviceSignals(req), meta: { brand: br.id } });
     await tx(db, (c) => consumeStepUp(c, jti));
 
     const order = (

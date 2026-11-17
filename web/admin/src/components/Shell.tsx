@@ -18,6 +18,8 @@ const NAV = [
   ["/trade", "Rates & convert"],
   ["/branding", "Branding"],
   ["/flags", "Feature flags"],
+  ["/risk", "Risk & AML"],
+  ["/ops", "Operations"],
   ["/audit", "Audit log"],
   ["/security", "Security (2FA)"],
 ] as const;

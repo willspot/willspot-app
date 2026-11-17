@@ -6,7 +6,7 @@ A Naira wallet for Nigeria: an account number for bank deposits, withdrawals to 
 
 ```
 brand/        brand.json + placeholder logo (seed for everything below)
-backend/      gateway · identity · wallet · trade · config · giftcards · bills  (Fastify + TypeScript, Postgres per service)
+backend/      gateway · identity · wallet · trade · config · giftcards · bills · risk  (Fastify + TypeScript, Postgres per service)
 mobile/       Flutter app (Android + iOS)
 web/site      marketing website (Next.js static export, motion animations)
 web/admin     admin dashboard (Next.js, httpOnly-cookie BFF)
@@ -72,6 +72,21 @@ cd mobile && flutter analyze && flutter test
 cd web && npm run typecheck && npm run build
 ```
 
+## Verification (2026-11-17, phase 3)
+| Check | Result |
+|---|---|
+| Backend type check + tests (8 services, provider adapters vs fake servers built from vendor docs, AML rules, ops) | 114/114 pass |
+| End-to-end smoke through the gateway (phases 1–3: AML hold on a new account's large withdrawal, admin release, ledger reconciles) | 34/34 pass |
+| Flutter analyze / tests (incl. pinning fail-closed, device-signal header) | no issues / 24/24 pass |
+| Native code compiles: Kotlin (APK) and Swift (iOS simulator) | pass |
+| Android emulator: device signals from Kotlin reached the risk service (`emulator: true`) | pass |
+| Dashboard in browser: Risk & AML page shows the held withdrawal alert; Operations page all green; CTR CSV downloads through the BFF | pass |
+| All 8 services bundle; website and dashboard production builds | pass |
+
+**Not verified in phase 3:** any real vendor sandbox (no keys yet; the adapters are tested against fakes built from the docs), certificate pinning against a real TLS host, iOS device signals at runtime, Redis rate limits, Docker/compose, GitHub Actions.
+
+Provider choices and how to switch them on: [docs/PROVIDERS.md](docs/PROVIDERS.md).
+
 ## Verification (2026-11-17, phase 2)
 | Check | Result |
 |---|---|
@@ -105,4 +120,4 @@ cd web && npm run typecheck && npm run build
 Android emulator, live sandbox backend: [onboarding](docs/screenshots/android-onboarding.png) · [home](docs/screenshots/android-home.png) · [convert](docs/screenshots/android-convert.png) · [gift cards](docs/screenshots/android-giftcards.png) · [bills](docs/screenshots/android-bills.png) · [markets](docs/screenshots/android-markets.png) · iOS simulator: [onboarding](docs/screenshots/ios-onboarding.png)
 
 ## Docs
-[Analysis of Bennybit](docs/BENNYBIT_ANALYSIS.md) · [Decisions](docs/DECISIONS.md) · [Phase plan](docs/PLAN.md) · [Security](docs/SECURITY.md) · [Branding](docs/BRANDING.md) · [Changelog](docs/CHANGELOG.md)
+[Analysis of Bennybit](docs/BENNYBIT_ANALYSIS.md) · [Providers](docs/PROVIDERS.md) · [Decisions](docs/DECISIONS.md) · [Phase plan](docs/PLAN.md) · [Security](docs/SECURITY.md) · [Branding](docs/BRANDING.md) · [Changelog](docs/CHANGELOG.md)

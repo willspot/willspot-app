@@ -1,5 +1,5 @@
-import { FlagsClient, callInternal, createPool, loadVerifier } from "@willspot/common";
-import { buildTrade, type LedgerClient } from "./app.js";
+import { FlagsClient, OpsNotifier, RiskClient, callInternal, createPool, every, loadVerifier } from "@willspot/common";
+import { buildTrade, pendingHealth, type LedgerClient } from "./app.js";
 import { SandboxMarketProvider } from "./market.js";
 import { startRetrier } from "./settlement.js";
 
@@ -27,9 +27,15 @@ const app = await buildTrade({
   ledger,
   users: { get: (id) => callInternal(identity, "GET", `/internal/users/${id}`) },
   flags: new FlagsClient(config),
+  risk: new RiskClient(process.env.RISK_INTERNAL_URL ? { baseUrl: process.env.RISK_INTERNAL_URL, service: "trade", token } : null),
 });
 
 // Finishes trades whose ledger call failed in transit (same idempotency key, never double-posts).
 startRetrier(db, ledger);
+const ops = new OpsNotifier("trade", process.env.OPS_ALERT_WEBHOOK_URL || undefined, (m) => app.log.warn(m));
+every(5 * 60_000, async () => {
+  const h = await pendingHealth(db);
+  if (h.pendingSettlements && h.oldestPendingMinutes >= 15) await ops.alert("pending-settlements", `${h.pendingSettlements} trade(s) waiting to settle; oldest ${h.oldestPendingMinutes} min`);
+}, (e) => app.log.error({ err: e }, "ops check failed"));
 
 await app.listen({ host: env("HOST", "0.0.0.0"), port: Number(env("PORT", "4003")) });

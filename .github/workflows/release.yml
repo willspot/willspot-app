@@ -3,7 +3,7 @@ name: release
 # Tag a component to ship it on its own, e.g.  git tag wallet-v0.2.0 && git push --tags
 on:
   push:
-    tags: ["gateway-v*", "identity-v*", "wallet-v*", "trade-v*", "config-v*", "giftcards-v*", "bills-v*"]
+    tags: ["gateway-v*", "identity-v*", "wallet-v*", "trade-v*", "config-v*", "giftcards-v*", "bills-v*", "risk-v*"]
 
 permissions:
   contents: read

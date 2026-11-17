@@ -1,6 +1,6 @@
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import { z } from "zod";
-import { AppError, amountSchema, badRequest, consumeStepUp, currentUser, forbidden, fromMinor, notFound, parse, toMinor, tx, uuidSchema, type Asset } from "@willspot/common";
+import { AppError, amountSchema, badRequest, consumeStepUp, currentUser, deviceSignals, forbidden, fromMinor, notFound, parse, toMinor, tx, uuidSchema, type Asset } from "@willspot/common";
 import type { TradeDeps } from "./app.js";
 import { CONVERTIBLE, convertAmounts, ngnPrices, scale } from "./pricing.js";
 import { convertSettlement, settle } from "./settlement.js";
@@ -58,8 +58,8 @@ export function registerConvert(app: FastifyInstance, deps: TradeDeps, auth: pre
     const rate = fmtRate(b.from, b.to, c.fromAmount, c.toAmount);
     const q = (
       await db.query<{ id: string; expires_at: Date }>(
-        "INSERT INTO convert_quotes(user_id, from_asset, to_asset, from_amount, to_amount, rate, expires_at) VALUES ($1,$2,$3,$4,$5,$6, now() + make_interval(secs => $7)) RETURNING id, expires_at",
-        [me.id, b.from, b.to, c.fromAmount.toString(), c.toAmount.toString(), rate, ttl],
+        "INSERT INTO convert_quotes(user_id, from_asset, to_asset, from_amount, to_amount, rate, ngn_value, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7, now() + make_interval(secs => $8)) RETURNING id, expires_at",
+        [me.id, b.from, b.to, c.fromAmount.toString(), c.toAmount.toString(), rate, c.ngnValue.toString(), ttl],
       )
     ).rows[0]!;
     reply.status(201);
@@ -89,7 +89,7 @@ export function registerConvert(app: FastifyInstance, deps: TradeDeps, auth: pre
 
     const q = await tx(db, async (c) => {
       const row = (
-        await c.query<{ id: string; user_id: string; from_asset: Asset; to_asset: Asset; from_amount: string; to_amount: string; rate: string; expired: boolean; used_at: Date | null }>(
+        await c.query<{ id: string; user_id: string; from_asset: Asset; to_asset: Asset; from_amount: string; to_amount: string; rate: string; ngn_value: string | null; expired: boolean; used_at: Date | null }>(
           "SELECT *, expires_at < now() AS expired FROM convert_quotes WHERE id=$1 AND user_id=$2 FOR UPDATE",
           [quoteId, me.id],
         )
@@ -103,6 +103,7 @@ export function registerConvert(app: FastifyInstance, deps: TradeDeps, auth: pre
       return row;
     });
 
+    await deps.risk?.check({ userId: me.id, kind: "convert", amountNgn: fromMinor(BigInt(q.ngn_value ?? "0"), "NGN"), device: deviceSignals(req), meta: { from: q.from_asset, to: q.to_asset } });
     const r = await settle(deps.ledger, convertSettlement({ ...q, quote_id: q.id }));
     const row = (
       await db.query(

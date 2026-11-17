@@ -11,6 +11,7 @@ export interface Upstreams {
   config: string;
   giftcards: string;
   bills: string;
+  risk: string;
 }
 
 /**
@@ -37,6 +38,7 @@ export const ROUTES: { prefix: string; to: keyof Upstreams; strict?: boolean }[]
   { prefix: "/v1/admin/giftcards", to: "giftcards" },
   { prefix: "/v1/bills", to: "bills" },
   { prefix: "/v1/admin/bills", to: "bills" },
+  { prefix: "/v1/admin/risk", to: "risk" },
 ];
 
 export interface GatewayOptions {
@@ -58,7 +60,7 @@ export async function buildGateway(opts: GatewayOptions) {
     origin: (origin, cb) => cb(null, !origin || opts.corsOrigins.includes(origin)),
     credentials: false,
     methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["authorization", "content-type", "x-step-up", "x-request-id", "if-none-match"],
+    allowedHeaders: ["authorization", "content-type", "x-step-up", "x-request-id", "if-none-match", "x-device-signals"],
     exposedHeaders: ["x-request-id", "etag"],
     maxAge: 600,
   });
