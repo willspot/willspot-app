@@ -28,17 +28,23 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   bool _resolving = false;
   bool _busy = false;
   Map<String, dynamic>? _quote;
+  List<Map<String, dynamic>> _saved = [];
+  bool _save = true;
   // Stable per attempt so a retried request can never pay out twice.
   final _idempotencyKey = 'wd-${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 30)}';
 
   @override
   void initState() {
     super.initState();
-    AppScope.read(context).api.get('/v1/wallet/banks').then((r) {
+    final api = AppScope.read(context).api;
+    api.get('/v1/wallet/banks').then((r) {
       if (mounted) setState(() => _banks = (r['banks'] as List).cast<Map<String, dynamic>>());
     }).catchError((Object e) {
       if (mounted) showError(context, e);
     });
+    api.get('/v1/wallet/beneficiaries').then((r) {
+      if (mounted) setState(() => _saved = (r['items'] as List).cast<Map<String, dynamic>>());
+    }).catchError((Object _) {});
   }
 
   @override
@@ -85,6 +91,10 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
         {'amount': _amount.text.replaceAll(',', ''), 'bankCode': _bank, 'accountNumber': _account.text, 'idempotencyKey': _idempotencyKey},
         {'x-step-up': token},
       );
+      final known = _saved.any((x) => x['bankCode'] == _bank && x['accountNumber'] == _account.text);
+      if (_save && !known) {
+        await state.api.post('/v1/wallet/beneficiaries', {'bankCode': _bank, 'accountNumber': _account.text}).catchError((Object _) => <String, dynamic>{});
+      }
       if (!mounted) return;
       final ok = r['status'] == 'completed';
       await Navigator.pushReplacement(
@@ -112,7 +122,33 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       body: Form(
         key: _form,
         child: ListView(padding: const EdgeInsets.all(20), children: [
+          if (_saved.isNotEmpty) ...[
+            const Text('Saved', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 44,
+              child: ListView(scrollDirection: Axis.horizontal, children: [
+                for (final b in _saved)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ActionChip(
+                      avatar: const Icon(Icons.person_outline, size: 18),
+                      label: Text(b['nickname'] as String? ?? b['accountName'] as String),
+                      onPressed: () {
+                        setState(() {
+                          _bank = b['bankCode'] as String;
+                          _account.text = b['accountNumber'] as String;
+                          _accountName = b['accountName'] as String;
+                        });
+                      },
+                    ),
+                  ),
+              ]),
+            ),
+            const SizedBox(height: 16),
+          ],
           DropdownButtonFormField<String>(
+            key: ValueKey(_bank),
             initialValue: _bank,
             decoration: const InputDecoration(labelText: 'Bank'),
             items: [for (final b in _banks) DropdownMenuItem(value: b['code'] as String, child: Text(b['name'] as String))],
@@ -175,7 +211,14 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                     ),
                   ),
           ),
-          const SizedBox(height: 28),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _save,
+            onChanged: (v) => setState(() => _save = v ?? false),
+            title: const Text('Save this account for next time'),
+            controlAffinity: ListTileControlAffinity.leading,
+          ),
+          const SizedBox(height: 12),
           BusyButton(label: 'Continue', icon: Icons.lock_outline, busy: _busy, onPressed: _accountName == null ? null : _submit),
         ]),
       ),

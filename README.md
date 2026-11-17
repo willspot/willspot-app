@@ -1,12 +1,12 @@
 # WillSpot
 
-A Naira wallet for Nigeria: an account number for bank deposits, withdrawals to any bank, and crypto buy/sell priced in Naira, with an animated Flutter app, website and admin dashboard. White-label: name, logo, colours, fonts and features are configurable (see [docs/BRANDING.md](docs/BRANDING.md)).
+A Naira wallet for Nigeria: an account number for bank deposits, withdrawals to any bank, crypto buy/sell, **convert any balance into the currency of your choice (Naira by default)**, a USD receiving account, gift-card trading and bill payments — with an animated Flutter app, website and admin dashboard. White-label: name, logo, colours, fonts and features are configurable (see [docs/BRANDING.md](docs/BRANDING.md)).
 
-> **Sandbox only.** No real bank, KYC, SMS or crypto provider is connected. Moving real money needs licences or licensed partners — get Nigerian legal advice first ([docs/BENNYBIT_ANALYSIS.md §6](docs/BENNYBIT_ANALYSIS.md)).
+> **Sandbox only.** No real bank, KYC, SMS, crypto, gift-card supplier or biller is connected. Moving real money needs licences or licensed partners — get Nigerian legal advice first ([docs/BENNYBIT_ANALYSIS.md §6](docs/BENNYBIT_ANALYSIS.md)).
 
 ```
 brand/        brand.json + placeholder logo (seed for everything below)
-backend/      gateway · identity · wallet · trade · config  (Fastify + TypeScript, Postgres per service)
+backend/      gateway · identity · wallet · trade · config · giftcards · bills  (Fastify + TypeScript, Postgres per service)
 mobile/       Flutter app (Android + iOS)
 web/site      marketing website (Next.js static export, motion animations)
 web/admin     admin dashboard (Next.js, httpOnly-cookie BFF)
@@ -44,7 +44,11 @@ cd mobile && flutter run
 ```
 For a real phone or a hosted API: `flutter run --dart-define=API_URL=https://your-api`.
 
-Try it: sign up (sandbox mode shows the OTP on screen), set a PIN, verify a BVN starting with `2`, open **Add money → Simulate ₦50,000 transfer**, then buy USDT and withdraw. Account numbers ending `9999` simulate a failed payout (it is reversed automatically).
+Try it: sign up (sandbox mode shows the OTP on screen), set a PIN, verify a BVN starting with `2`, open **Add money → Simulate ₦50,000 transfer**, then buy USDT, **Convert** it back to Naira, open the **USD account** and simulate a $100 payment, sell a gift card (approve it in the dashboard → Gift cards), buy airtime, and withdraw.
+
+Sandbox triggers: account numbers ending `9999` fail payout (reversed automatically); bill customer numbers ending `999` fail vending (refunded) and ending `000` don't exist.
+
+Admins: dashboard → **Security** turns on two-factor sign-in. Set `ADMIN_REQUIRE_MFA=1` to require it (required in production).
 
 ### With Docker
 ```bash
@@ -68,7 +72,20 @@ cd mobile && flutter analyze && flutter test
 cd web && npm run typecheck && npm run build
 ```
 
-## Verification (2026-11-16, this machine)
+## Verification (2026-11-17, phase 2)
+| Check | Result |
+|---|---|
+| Backend type check + tests (8 services incl. gift cards, bills, convert, TOTP RFC vectors) | 80/80 pass |
+| End-to-end smoke through the gateway, phase 1 + 2 (convert, USD account, gift card sell → admin approve, airtime, beneficiary, receipt) | 28/28 pass |
+| All 7 services bundle with esbuild | pass |
+| Flutter analyze / tests | no issues / 21/21 pass |
+| Android emulator: session restore, gift-card payout in balance, live Convert USDT → NGN with PIN, expired-quote handling, gift cards + bills screens | pass (screenshots) |
+| Dashboard in browser: gift-card review shows decrypted code, approve pays the user | pass |
+| Website and dashboard production builds | pass |
+
+**Not verified in phase 2:** Redis-backed rate limits (no Redis here), Docker/compose, GitHub Actions, iOS for the new screens, photo upload from a real camera (picker wired, tested only by code review).
+
+### Phase 1 verification (2026-11-16)
 | Check | Result |
 |---|---|
 | Backend type check | pass |
@@ -85,7 +102,7 @@ cd web && npm run typecheck && npm run build
 **Not verified:** Docker image builds and compose stack (Docker daemon not running), GitHub Actions (no remote yet; YAML syntax checked only), iOS flows beyond the first screen, release-signed builds, any real provider.
 
 ## Screenshots
-Android emulator, live sandbox backend: [onboarding](docs/screenshots/android-onboarding.png) · [home](docs/screenshots/android-home.png) · [markets](docs/screenshots/android-markets.png) · iOS simulator: [onboarding](docs/screenshots/ios-onboarding.png)
+Android emulator, live sandbox backend: [onboarding](docs/screenshots/android-onboarding.png) · [home](docs/screenshots/android-home.png) · [convert](docs/screenshots/android-convert.png) · [gift cards](docs/screenshots/android-giftcards.png) · [bills](docs/screenshots/android-bills.png) · [markets](docs/screenshots/android-markets.png) · iOS simulator: [onboarding](docs/screenshots/ios-onboarding.png)
 
 ## Docs
 [Analysis of Bennybit](docs/BENNYBIT_ANALYSIS.md) · [Decisions](docs/DECISIONS.md) · [Phase plan](docs/PLAN.md) · [Security](docs/SECURITY.md) · [Branding](docs/BRANDING.md) · [Changelog](docs/CHANGELOG.md)

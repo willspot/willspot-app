@@ -18,6 +18,11 @@ Mapped to OWASP ASVS 4.0 (backend/web) and MASVS 2 (mobile) categories. Category
 | V11 Business logic | Double-entry ledger with DB-enforced balance and no-overdraft constraints, append-only postings, idempotency keys, daily limits per KYC tier serialised per user, quotes single-use with 30 s expiry | Tested (wallet/trade tests) |
 | V12/V13 API | Webhooks verified with HMAC-SHA256 over the raw body (constant-time compare), idempotent on provider reference; CORS allow-list; rate limits (stricter on auth/KYC) | Tested (gateway, wallet) |
 | V14 Config | No secrets in code; `.env` generated locally (mode 600) and git-ignored; services refuse to start in production with sandbox providers, dev OTP exposure or fast hashing; images run as non-root, read-only, all capabilities dropped | Startup guards not unit-tested |
+| Admin 2FA | TOTP (RFC 6238) with encrypted secret, replay refusal, lockout counting; `ADMIN_REQUIRE_MFA=1` enforced on every admin route; production refuses to start without it | Tested (RFC vectors + full flow) |
+| Sensitive fields | Gift-card codes and TOTP secrets AES-256-GCM encrypted with per-service keys; codes decrypted only for reviewers, each view audited; duplicate cards refused by hash | Tested |
+| Uploads | Gift-card photos accepted only when the bytes are JPEG/PNG (magic numbers), ≤1.5 MB; SVG and other types refused | Tested |
+| Step-up scopes | `withdraw`, `trade`, `pay`, `delete_account` — a token for one cannot authorise another | Tested |
+| Rate limits (multi-replica) | Shared Redis store when `REDIS_URL` is set (fails open if Redis is down) | **Not run locally** (no Redis here) |
 | Admin web | Tokens only in httpOnly SameSite=Strict cookies; CSRF header on mutations; proxy allow-list; CSP, frame-ancestors none, no-referrer, noindex | Manually verified with curl |
 
 ## Mobile (MASVS)
@@ -35,8 +40,8 @@ Mapped to OWASP ASVS 4.0 (backend/web) and MASVS 2 (mobile) categories. Category
 ## Before launch (must-do)
 1. Pin GitHub Actions to commit SHAs and Docker base images to digests.
 2. Certificate pinning in the app; root/jailbreak signals.
-3. Admin 2FA (TOTP or passkeys) and per-admin roles.
-4. Shared rate-limit store (Redis) and WAF in front of the gateway.
+3. ~~Admin 2FA~~ done (phase 2); per-admin roles still to do.
+4. ~~Shared rate-limit store~~ wired (verify in staging); WAF in front of the gateway.
 5. Secrets from a secret manager; rotate the dev keys.
 6. External penetration test; NDPA data-protection impact assessment.
 7. Re-check every point above against ASVS L2 / MASVS-L2 line by line.

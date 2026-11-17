@@ -15,6 +15,8 @@ const app = await buildConfig({
     identity: process.env.SERVICE_TOKEN_IDENTITY,
     wallet: process.env.SERVICE_TOKEN_WALLET,
     trade: process.env.SERVICE_TOKEN_TRADE,
+    giftcards: process.env.SERVICE_TOKEN_GIFTCARDS,
+    bills: process.env.SERVICE_TOKEN_BILLS,
   },
 });
 

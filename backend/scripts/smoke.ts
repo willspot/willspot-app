@@ -75,6 +75,47 @@ if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
   check("admin wallet summary", s.status === 200 && s.json.deposits.count >= 1, s.json);
   const st = await call("GET", "/v1/admin/stats", undefined, a.json.accessToken);
   check("admin user stats", st.status === 200 && st.json.users >= 1, st.json);
+
+  // ---------- Phase 2 ----------
+  const at = a.json.accessToken as string;
+  const cfg2 = (await call("GET", "/v1/config/public")).json;
+  await call("POST", "/v1/admin/config/flags", { flags: { ...cfg2.flags, gift_cards: true, usd_account: true, bill_payments: true } }, at);
+  // services cache flags for up to 30s
+  const flagsLive = async () =>
+    (await call("GET", "/v1/bills/billers")).status === 200 &&
+    (await call("GET", "/v1/giftcards/brands")).status === 200 &&
+    (await call("GET", "/v1/wallet/usd-account", undefined, token)).status !== 503;
+  for (let i = 0; i < 40 && !(await flagsLive()); i++) await new Promise((r) => setTimeout(r, 1000));
+
+  const step = async (scope: string) => (await call("POST", "/v1/me/pin/verify", { pin: "4826", scope }, token)).json.stepUpToken as string;
+
+  const rates = await call("GET", "/v1/trade/convert/rates?from=USDT");
+  check("convert: NGN is the default target", rates.json.defaultTo === "NGN", rates.json);
+  const cq = await call("POST", "/v1/trade/convert/quotes", { from: "USDT", amount: "5" }, token);
+  const conv = await call("POST", "/v1/trade/convert", { quoteId: cq.json.quoteId }, token, { "x-step-up": await step("trade") });
+  check("convert USDT → NGN (default)", conv.json.status === "completed" && conv.json.to === "NGN", conv.json);
+
+  const usd = await call("GET", "/v1/wallet/usd-account", undefined, token);
+  check("USD account opened", usd.json.currency === "USD", usd.json);
+  await call("POST", "/v1/sandbox/deposits", { amount: "100", currency: "USD" }, token);
+  const uq = await call("POST", "/v1/trade/convert/quotes", { from: "USD", to: "NGN", amount: "100" }, token);
+  const uconv = await call("POST", "/v1/trade/convert", { quoteId: uq.json.quoteId }, token, { "x-step-up": await step("trade") });
+  check("convert USD → NGN", uconv.json.status === "completed", uconv.json);
+
+  const card = `SMOKE${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
+  const gs = await call("POST", "/v1/giftcards/sell", { brandId: "amazon_us", value: 25, code: card, idempotencyKey: randomUUID() }, token);
+  check("gift card submitted for review", gs.json.status === "pending", gs.json);
+  const dec = await call("POST", `/v1/admin/giftcards/trades/${gs.json.id}/decision`, { decision: "approved" }, at);
+  check("admin approves gift card", dec.status === 200, dec.json);
+
+  const bill = await call("POST", "/v1/bills/pay", { billerId: "mtn_airtime", customerId: "08031234567", amount: "500", idempotencyKey: randomUUID() }, token, { "x-step-up": await step("pay") });
+  check("airtime purchased", bill.json.status === "completed", bill.json);
+
+  const ben = await call("POST", "/v1/wallet/beneficiaries", { bankCode: "SBX001", accountNumber: "0123456789", nickname: "Me" }, token);
+  check("beneficiary saved", ben.status === 201, ben.json);
+  const latest = (await call("GET", "/v1/wallet/transactions?limit=1", undefined, token)).json.items[0];
+  const receipt = await call("GET", `/v1/wallet/transactions/${latest.id}`, undefined, token);
+  check("receipt available", /^WS-/.test(receipt.json.reference ?? ""), receipt.json);
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll smoke checks passed");

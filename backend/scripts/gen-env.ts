@@ -28,12 +28,18 @@ const values: Record<string, string> = {
   SERVICE_TOKEN_IDENTITY: secret(),
   SERVICE_TOKEN_WALLET: secret(),
   SERVICE_TOKEN_TRADE: secret(),
+  SERVICE_TOKEN_GIFTCARDS: secret(),
+  SERVICE_TOKEN_BILLS: secret(),
+  GIFTCARD_CODE_KEY: randomBytes(32).toString("base64"),
+  IDENTITY_FIELD_KEY: randomBytes(32).toString("base64"),
   DEPOSIT_WEBHOOK_SECRET: secret(),
   ADMIN_PASSWORD: `Adm1n${randomBytes(9).toString("base64url")}`,
   IDENTITY_DATABASE_URL: `${dbBase}/willspot_identity`,
   WALLET_DATABASE_URL: `${dbBase}/willspot_wallet`,
   TRADE_DATABASE_URL: `${dbBase}/willspot_trade`,
   CONFIG_DATABASE_URL: `${dbBase}/willspot_config`,
+  GIFTCARDS_DATABASE_URL: `${dbBase}/willspot_giftcards`,
+  BILLS_DATABASE_URL: `${dbBase}/willspot_bills`,
 };
 const env = example
   .split("\n")

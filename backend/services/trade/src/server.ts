@@ -1,6 +1,7 @@
 import { FlagsClient, callInternal, createPool, loadVerifier } from "@willspot/common";
-import { buildTrade } from "./app.js";
+import { buildTrade, type LedgerClient } from "./app.js";
 import { SandboxMarketProvider } from "./market.js";
+import { startRetrier } from "./settlement.js";
 
 const env = (k: string, d?: string) => {
   const v = process.env[k] ?? d;
@@ -17,13 +18,18 @@ const wallet = { baseUrl: env("WALLET_INTERNAL_URL", "http://localhost:4002"), s
 const identity = { baseUrl: env("IDENTITY_INTERNAL_URL", "http://localhost:4001"), service: "trade", token };
 const config = process.env.CONFIG_INTERNAL_URL ? { baseUrl: process.env.CONFIG_INTERNAL_URL, service: "trade", token } : null;
 
+const db = createPool(env("TRADE_DATABASE_URL"));
+const ledger: LedgerClient = { post: (body) => callInternal(wallet, "POST", "/internal/ledger/journals", body) };
 const app = await buildTrade({
-  db: createPool(env("TRADE_DATABASE_URL")),
+  db,
   verifier: await loadVerifier(env("JWT_PUBLIC_KEY")),
   market: new SandboxMarketProvider(),
-  ledger: { post: (body) => callInternal(wallet, "POST", "/internal/ledger/journals", body) },
+  ledger,
   users: { get: (id) => callInternal(identity, "GET", `/internal/users/${id}`) },
   flags: new FlagsClient(config),
 });
+
+// Finishes trades whose ledger call failed in transit (same idempotency key, never double-posts).
+startRetrier(db, ledger);
 
 await app.listen({ host: env("HOST", "0.0.0.0"), port: Number(env("PORT", "4003")) });

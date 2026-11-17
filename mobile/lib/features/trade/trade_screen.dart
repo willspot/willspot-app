@@ -75,7 +75,7 @@ class _TradeScreenState extends State<TradeScreen> {
     } on ApiException catch (e) {
       if (!mounted) return;
       showError(context, e);
-      if (e.code == 'quote_expired') setState(() => _quote = null);
+      if (e.code == 'quote_expired') _changed();
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -132,7 +132,8 @@ class _TradeScreenState extends State<TradeScreen> {
                       CountdownRing(
                         duration: Duration(seconds: (_quote!['expiresIn'] as num).toInt()),
                         onDone: () {
-                          if (mounted) setState(() => _quote = null);
+                          // Price expired: fetch a fresh one rather than leaving the user stuck.
+                          if (mounted) _changed();
                         },
                       ),
                     ]),
@@ -146,7 +147,7 @@ class _TradeScreenState extends State<TradeScreen> {
                 ),
         ),
         const SizedBox(height: 28),
-        BusyButton(label: _quote == null ? 'Enter an amount' : 'Confirm with PIN', icon: Icons.lock_outline, busy: _busy, onPressed: _quote == null ? null : _confirm),
+        BusyButton(label: _quote != null ? 'Confirm with PIN' : (Validation.amount(_amount.text) == null ? 'Getting the latest price…' : 'Enter an amount'), icon: Icons.lock_outline, busy: _busy, onPressed: _quote == null ? null : _confirm),
       ]),
     );
   }

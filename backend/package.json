@@ -13,7 +13,7 @@
     "dev": "tsx scripts/dev.ts",
     "db:test:start": "bash scripts/test-db.sh start",
     "db:test:stop": "bash scripts/test-db.sh stop",
-    "build": "for s in gateway identity wallet trade config; do node scripts/build.mjs $s; done"
+    "build": "for s in gateway identity wallet trade config giftcards bills; do node scripts/build.mjs $s; done"
   },
   "devDependencies": {
     "@types/node": "26.6.6",

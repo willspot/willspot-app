@@ -1,7 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { SignJWT, exportPKCS8, exportSPKI, generateKeyPair, importPKCS8, importSPKI, jwtVerify, type CryptoKey } from "jose";
 import { randomUUID } from "node:crypto";
-import { forbidden, unauthorized } from "./errors.js";
+import { AppError, forbidden, unauthorized } from "./errors.js";
 
 export interface AuthUser {
   id: string;
@@ -9,6 +9,8 @@ export interface AuthUser {
   /** KYC tier: 0 = phone verified, 1 = BVN verified, 2 = ID + selfie approved. */
   tier: number;
   sid: string;
+  /** True when this session was signed in with a second factor (TOTP). */
+  mfa?: boolean;
 }
 
 const ISSUER = "willspot-identity";
@@ -16,13 +18,13 @@ const AUD_ACCESS = "willspot-api";
 const AUD_STEP_UP = "willspot-step-up";
 const ALG = "EdDSA";
 
-export type StepUpScope = "withdraw" | "trade" | "delete_account";
+export type StepUpScope = "withdraw" | "trade" | "pay" | "delete_account";
 
 export class TokenIssuer {
   constructor(private readonly key: CryptoKey) {}
 
   signAccess(u: AuthUser, ttl = "15m"): Promise<string> {
-    return new SignJWT({ role: u.role, tier: u.tier, sid: u.sid })
+    return new SignJWT({ role: u.role, tier: u.tier, sid: u.sid, ...(u.mfa ? { mfa: true } : {}) })
       .setProtectedHeader({ alg: ALG })
       .setIssuer(ISSUER)
       .setAudience(AUD_ACCESS)
@@ -53,7 +55,7 @@ export class TokenVerifier {
     try {
       const { payload } = await jwtVerify(token, this.key, { issuer: ISSUER, audience: AUD_ACCESS, algorithms: [ALG] });
       const role = payload.role === "admin" ? "admin" : "user";
-      return { id: String(payload.sub), role, tier: Number(payload.tier ?? 0), sid: String(payload.sid ?? "") };
+      return { id: String(payload.sub), role, tier: Number(payload.tier ?? 0), sid: String(payload.sid ?? ""), ...(payload.mfa === true ? { mfa: true } : {}) };
     } catch {
       throw unauthorized("Session expired or invalid");
     }
@@ -88,8 +90,15 @@ export function authenticate(verifier: TokenVerifier) {
   };
 }
 
+/**
+ * Admin routes. With ADMIN_REQUIRE_MFA=1 (required in production by the identity
+ * service), the session must also have been signed in with TOTP.
+ */
 export async function requireAdmin(req: FastifyRequest, _reply: FastifyReply) {
   if (req.user?.role !== "admin") throw forbidden("Admin only");
+  if (process.env.ADMIN_REQUIRE_MFA === "1" && !req.user.mfa) {
+    throw new AppError(403, "mfa_required", "Sign in with your authenticator code to use admin tools");
+  }
 }
 
 export function currentUser(req: FastifyRequest): AuthUser {

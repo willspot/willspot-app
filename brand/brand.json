@@ -25,8 +25,8 @@
     "deposits": true,
     "withdrawals": true,
     "crypto_trading": true,
-    "gift_cards": false,
-    "usd_account": false,
-    "bill_payments": false
+    "gift_cards": true,
+    "usd_account": true,
+    "bill_payments": true
   }
 }

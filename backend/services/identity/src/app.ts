@@ -2,7 +2,11 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   AppError,
+  FieldCipher,
   FlagsClient,
+  newTotpSecret,
+  otpauthUrl,
+  verifyTotp,
   TokenIssuer,
   TokenVerifier,
   authenticate,
@@ -46,6 +50,8 @@ export interface IdentityDeps {
   exposeDevOtp?: boolean;
   serviceTokens: Record<string, string | undefined>;
   flags?: FlagsClient;
+  /** Encrypts TOTP secrets at rest. Required for TOTP endpoints. */
+  cipher?: FieldCipher;
   logger?: boolean;
 }
 
@@ -72,6 +78,9 @@ interface UserRow {
   status: string;
   kyc_tier: number;
   failed_logins: number;
+  totp_secret_enc: string | null;
+  totp_enabled: boolean;
+  totp_last_step: string | null;
   locked_until: Date | null;
   pin_failures: number;
   pin_locked_until: Date | null;
@@ -88,6 +97,7 @@ const publicUser = (u: UserRow) => ({
   status: u.status,
   kycTier: u.kyc_tier,
   hasPin: u.pin_hash !== null,
+  totpEnabled: u.totp_enabled,
   createdAt: u.created_at,
 });
 
@@ -98,6 +108,11 @@ export async function buildIdentity(deps: IdentityDeps) {
   await migrate(db, MIGRATIONS);
   const app = await createApp("identity", { logger: deps.logger });
   const auth = authenticate(verifier);
+
+  const totpSecret = (u: UserRow) => {
+    if (!deps.cipher || !u.totp_secret_enc) throw new AppError(500, "totp_unavailable", "Two-factor sign-in is not configured");
+    return deps.cipher.decrypt(u.totp_secret_enc);
+  };
 
   const getUser = async (id: string) =>
     (await db.query<UserRow>("SELECT * FROM users WHERE id = $1", [id])).rows[0];
@@ -120,18 +135,18 @@ export async function buildIdentity(deps: IdentityDeps) {
     return code;
   }
 
-  async function startSession(u: UserRow, deviceId: string | undefined, userAgent: string | undefined) {
+  async function startSession(u: UserRow, deviceId: string | undefined, userAgent: string | undefined, mfa = false) {
     const refresh = randomToken(32);
     const s = await db.query<{ id: string }>(
-      "INSERT INTO sessions(user_id, refresh_hash, device_id, user_agent, expires_at) VALUES ($1,$2,$3,$4, now() + make_interval(days => $5)) RETURNING id",
-      [u.id, sha256(refresh), deviceId ?? null, userAgent?.slice(0, 200) ?? null, REFRESH_TTL_DAYS],
+      "INSERT INTO sessions(user_id, refresh_hash, device_id, user_agent, expires_at, mfa) VALUES ($1,$2,$3,$4, now() + make_interval(days => $5), $6) RETURNING id",
+      [u.id, sha256(refresh), deviceId ?? null, userAgent?.slice(0, 200) ?? null, REFRESH_TTL_DAYS, mfa],
     );
     const sid = s.rows[0]!.id;
-    return tokensFor(u, sid, refresh);
+    return tokensFor(u, sid, refresh, mfa);
   }
 
-  async function tokensFor(u: UserRow, sid: string, refresh: string) {
-    const claims: AuthUser = { id: u.id, role: u.role, tier: u.kyc_tier, sid };
+  async function tokensFor(u: UserRow, sid: string, refresh: string, mfa = false) {
+    const claims: AuthUser = { id: u.id, role: u.role, tier: u.kyc_tier, sid, ...(mfa ? { mfa: true } : {}) };
     return { accessToken: await issuer.signAccess(claims), refreshToken: refresh, expiresIn: 900, user: publicUser(u) };
   }
 
@@ -198,7 +213,7 @@ export async function buildIdentity(deps: IdentityDeps) {
   // ---------- Login, refresh, logout ----------
 
   app.post("/v1/auth/login", async (req) => {
-    const body = parse(z.object({ email: emailSchema, password: z.string().min(1).max(128), deviceId: z.string().max(100).optional() }), req.body);
+    const body = parse(z.object({ email: emailSchema, password: z.string().min(1).max(128), deviceId: z.string().max(100).optional(), totp: z.string().max(10).optional() }), req.body);
     const u = (await db.query<UserRow>("SELECT * FROM users WHERE email=$1", [body.email])).rows[0];
     const fail = () => unauthorized("Email or password is incorrect");
     if (!u) {
@@ -224,8 +239,21 @@ export async function buildIdentity(deps: IdentityDeps) {
       });
     }
     if (u.status !== "active") throw forbidden("This account is not active. Contact support.");
+    let mfa = false;
+    if (u.totp_enabled) {
+      if (!body.totp) throw new AppError(401, "totp_required", "Enter the 6-digit code from your authenticator app");
+      const step = verifyTotp(totpSecret(u), body.totp, u.totp_last_step === null ? null : Number(u.totp_last_step));
+      if (step === null) {
+        const failures = u.failed_logins + 1;
+        const lock = failures >= MAX_LOGIN_FAILURES;
+        await db.query("UPDATE users SET failed_logins=$2, locked_until = CASE WHEN $3 THEN now() + make_interval(mins => $4) ELSE locked_until END WHERE id=$1", [u.id, lock ? 0 : failures, lock, LOGIN_LOCK_MINUTES]);
+        throw new AppError(401, "totp_invalid", "That authenticator code is wrong or already used");
+      }
+      await db.query("UPDATE users SET totp_last_step=$2 WHERE id=$1", [u.id, step]);
+      mfa = true;
+    }
     await db.query("UPDATE users SET failed_logins=0, locked_until=NULL WHERE id=$1", [u.id]);
-    return startSession(u, body.deviceId, req.headers["user-agent"]);
+    return startSession(u, body.deviceId, req.headers["user-agent"], mfa);
   });
 
   app.post("/v1/auth/refresh", async (req) => {
@@ -243,8 +271,8 @@ export async function buildIdentity(deps: IdentityDeps) {
     }
     return tx(db, async (c) => {
       const s = (
-        await c.query<{ id: string; user_id: string; expires_at: Date; revoked_at: Date | null }>(
-          "SELECT id, user_id, expires_at, revoked_at FROM sessions WHERE refresh_hash=$1 FOR UPDATE",
+        await c.query<{ id: string; user_id: string; expires_at: Date; revoked_at: Date | null; mfa: boolean }>(
+          "SELECT id, user_id, expires_at, revoked_at, mfa FROM sessions WHERE refresh_hash=$1 FOR UPDATE",
           [h],
         )
       ).rows[0];
@@ -254,7 +282,7 @@ export async function buildIdentity(deps: IdentityDeps) {
       if (u.status !== "active") throw unauthorized("Session expired");
       const next = randomToken(32);
       await c.query("UPDATE sessions SET refresh_hash=$2, previous_hash=$3 WHERE id=$1", [s.id, sha256(next), h]);
-      return tokensFor(u, s.id, next);
+      return tokensFor(u, s.id, next, s.mfa);
     });
   });
 
@@ -282,7 +310,7 @@ export async function buildIdentity(deps: IdentityDeps) {
   });
 
   app.post("/v1/me/pin/verify", { preHandler: auth }, async (req) => {
-    const body = parse(z.object({ pin: z.string().regex(/^\d{4}$/), scope: z.enum(["withdraw", "trade", "delete_account"]) }), req.body);
+    const body = parse(z.object({ pin: z.string().regex(/^\d{4}$/), scope: z.enum(["withdraw", "trade", "pay", "delete_account"]) }), req.body);
     const u = await getUser(currentUser(req).id);
     if (!u?.pin_hash) throw badRequest("pin_not_set", "Set a transaction PIN first");
     if (u.pin_locked_until && u.pin_locked_until > new Date()) throw tooMany("PIN locked. Try again later.");
@@ -297,6 +325,42 @@ export async function buildIdentity(deps: IdentityDeps) {
     }
     await db.query("UPDATE users SET pin_failures=0 WHERE id=$1", [u.id]);
     return { stepUpToken: await issuer.signStepUp(u.id, body.scope as StepUpScope), expiresIn: 120 };
+  });
+
+  // ---------- Two-factor sign-in (TOTP) ----------
+
+  app.post("/v1/me/totp/setup", { preHandler: auth }, async (req) => {
+    if (!deps.cipher) throw new AppError(503, "totp_unavailable", "Two-factor sign-in is not configured");
+    const { password } = parse(z.object({ password: z.string().min(1).max(128) }), req.body);
+    const u = await getUser(currentUser(req).id);
+    if (!u || !(await verifySecret(password, u.password_hash))) throw unauthorized("Password is incorrect");
+    if (u.totp_enabled) throw conflict("totp_enabled", "Two-factor sign-in is already on");
+    const secret = newTotpSecret();
+    await db.query("UPDATE users SET totp_secret_enc=$2, totp_last_step=NULL WHERE id=$1", [u.id, deps.cipher.encrypt(secret)]);
+    return { secret, otpauthUrl: otpauthUrl("WillSpot", u.email, secret) };
+  });
+
+  app.post("/v1/me/totp/enable", { preHandler: auth }, async (req) => {
+    const { code } = parse(z.object({ code: z.string().regex(/^\d{6}$/) }), req.body);
+    const u = await getUser(currentUser(req).id);
+    if (!u?.totp_secret_enc || u.totp_enabled) throw badRequest("totp_not_pending", "Start two-factor setup first");
+    const step = verifyTotp(totpSecret(u), code, null);
+    if (step === null) throw badRequest("totp_invalid", "That code didn't match. Check your phone's clock and try again.");
+    await db.query("UPDATE users SET totp_enabled=true, totp_last_step=$2 WHERE id=$1", [u.id, step]);
+    await audit(u.id, "totp.enabled", u.id);
+    return { ok: true, message: "Two-factor sign-in is on. Sign in again to get a two-factor session." };
+  });
+
+  app.post("/v1/me/totp/disable", { preHandler: auth }, async (req) => {
+    const b = parse(z.object({ password: z.string().min(1).max(128), code: z.string().regex(/^\d{6}$/) }), req.body);
+    const u = await getUser(currentUser(req).id);
+    if (!u?.totp_enabled) throw badRequest("totp_off", "Two-factor sign-in is not on");
+    if (!(await verifySecret(b.password, u.password_hash))) throw unauthorized("Password is incorrect");
+    if (verifyTotp(totpSecret(u), b.code, u.totp_last_step === null ? null : Number(u.totp_last_step)) === null) throw unauthorized("That code is wrong");
+    await db.query("UPDATE users SET totp_enabled=false, totp_secret_enc=NULL, totp_last_step=NULL WHERE id=$1", [u.id]);
+    await db.query("UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL AND id <> $2", [u.id, currentUser(req).sid]);
+    await audit(u.id, "totp.disabled", u.id);
+    return { ok: true };
   });
 
   app.post("/v1/me/delete", { preHandler: auth }, async (req) => {

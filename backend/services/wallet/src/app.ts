@@ -61,7 +61,7 @@ export const MIGRATIONS = fileURLToPath(new URL("../migrations", import.meta.url
 export const DEFAULT_LIMITS: Record<number, bigint> = { 0: 0n, 1: 200_000_00n, 2: 5_000_000_00n };
 
 /** Which system accounts each calling service may post to. */
-const SERVICE_SYSTEM_ACCOUNTS: Record<string, string[]> = { trade: ["trade", "fees"] };
+const SERVICE_SYSTEM_ACCOUNTS: Record<string, string[]> = { trade: ["trade", "fees"], giftcards: ["giftcards"], bills: ["bills"] };
 
 const WALLET_ASSETS: Asset[] = ["NGN", "USD", "BTC", "ETH", "USDT"];
 
@@ -119,16 +119,18 @@ export async function buildWallet(deps: WalletDeps) {
   const depositEvent = z.object({
     event: z.literal("deposit.succeeded"),
     reference: z.string().min(6).max(100),
-    accountNumber: nubanSchema,
+    accountNumber: z.string().regex(/^\d{8,17}$/),
     amount: amountSchema,
-    currency: z.literal("NGN"),
+    currency: z.enum(["NGN", "USD"]),
     senderName: z.string().max(120).optional(),
   });
 
   async function processDeposit(evt: z.infer<typeof depositEvent>) {
-    const amount = toMinor(evt.amount, "NGN");
+    const cur: Asset = evt.currency;
+    const amount = toMinor(evt.amount, cur);
     if (amount <= 0n) throw badRequest("invalid_amount", "Amount must be positive");
-    const va = (await db.query<{ user_id: string }>("SELECT user_id FROM virtual_accounts WHERE account_number=$1", [evt.accountNumber])).rows[0];
+    const table = cur === "USD" ? "usd_accounts" : "virtual_accounts";
+    const va = (await db.query<{ user_id: string }>(`SELECT user_id FROM ${table} WHERE account_number=$1`, [evt.accountNumber])).rows[0];
     if (!va) throw notFound("Unknown account number");
     return tx(db, async (c) => {
       const prior = await c.query("SELECT id FROM deposits WHERE provider_ref=$1", [evt.reference]);
@@ -137,19 +139,102 @@ export async function buildWallet(deps: WalletDeps) {
         idempotencyKey: `dep:${evt.reference}`,
         type: "deposit",
         userId: va.user_id,
-        description: `Bank transfer${evt.senderName ? ` from ${evt.senderName}` : ""}`,
-        meta: { reference: evt.reference },
+        description: `${cur === "USD" ? "USD payment" : "Bank transfer"}${evt.senderName ? ` from ${evt.senderName}` : ""}`,
+        meta: { reference: evt.reference, currency: cur },
         legs: [
-          { code: sysCode("bank", "NGN"), asset: "NGN", amount: -amount },
-          { code: userCode(va.user_id, "NGN"), asset: "NGN", amount },
+          { code: sysCode("bank", cur), asset: cur, amount: -amount },
+          { code: userCode(va.user_id, cur), asset: cur, amount },
         ],
       });
-      await c.query("INSERT INTO deposits(provider_ref, user_id, amount, sender_name, journal_id) VALUES ($1,$2,$3,$4,$5)", [
-        evt.reference, va.user_id, amount.toString(), evt.senderName ?? null, j.journalId,
+      await c.query("INSERT INTO deposits(provider_ref, user_id, amount, sender_name, journal_id, currency) VALUES ($1,$2,$3,$4,$5,$6)", [
+        evt.reference, va.user_id, amount.toString(), evt.senderName ?? null, j.journalId, cur,
       ]);
       return { duplicate: false };
     });
   }
+
+  /** Sandbox USD receiving account (for freelancers paid from abroad). A licensed partner replaces this. */
+  app.get("/v1/wallet/usd-account", { preHandler: auth }, async (req) => {
+    const me = currentUser(req);
+    await deps.flags.require("usd_account");
+    const u = await activeUser(me.id, 1);
+    const view = (r: { account_number: string; routing_number: string; account_name: string; bank_name: string }) => ({
+      accountNumber: r.account_number, routingNumber: r.routing_number, accountName: r.account_name, bankName: r.bank_name, currency: "USD", sandbox: true,
+    });
+    const existing = await db.query("SELECT * FROM usd_accounts WHERE user_id=$1", [me.id]);
+    if (existing.rowCount) return view(existing.rows[0]);
+    for (let i = 0; i < 5; i++) {
+      const num = `88${String(Math.floor(Math.random() * 1e10)).padStart(10, "0")}`;
+      const r = await db.query(
+        "INSERT INTO usd_accounts(user_id, account_number, routing_number, account_name, bank_name, provider) VALUES ($1,$2,'000000000',$3,'WillSpot Sandbox USD Bank','sandbox') ON CONFLICT DO NOTHING RETURNING *",
+        [me.id, num, `${u.firstName} ${u.lastName}`.toUpperCase()],
+      );
+      if (r.rowCount) return view(r.rows[0]);
+      const again = await db.query("SELECT * FROM usd_accounts WHERE user_id=$1", [me.id]);
+      if (again.rowCount) return view(again.rows[0]);
+    }
+    throw new AppError(503, "va_unavailable", "Could not create a USD account, try again");
+  });
+
+  // ---------- Saved beneficiaries ----------
+
+  app.get("/v1/wallet/beneficiaries", { preHandler: auth }, async (req) => {
+    const r = await db.query("SELECT id, bank_code, account_number, account_name, nickname FROM beneficiaries WHERE user_id=$1 ORDER BY created_at DESC", [currentUser(req).id]);
+    return { items: r.rows.map((b) => ({ id: b.id, bankCode: b.bank_code, accountNumber: b.account_number, accountName: b.account_name, nickname: b.nickname })) };
+  });
+
+  app.post("/v1/wallet/beneficiaries", { preHandler: auth }, async (req, reply) => {
+    const me = currentUser(req);
+    const b = parse(z.object({ bankCode: z.string().max(20), accountNumber: nubanSchema, nickname: z.string().trim().max(40).optional() }), req.body);
+    const count = await db.query<{ n: string }>("SELECT count(*) AS n FROM beneficiaries WHERE user_id=$1", [me.id]);
+    if (Number(count.rows[0]!.n) >= 50) throw badRequest("too_many", "You can save up to 50 beneficiaries");
+    const resolved = await bank.resolveAccount(b.bankCode, b.accountNumber);
+    if (!resolved) throw notFound("Account not found at that bank");
+    const r = await db.query(
+      "INSERT INTO beneficiaries(user_id, bank_code, account_number, account_name, nickname) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id, bank_code, account_number) DO UPDATE SET nickname=EXCLUDED.nickname RETURNING id",
+      [me.id, b.bankCode, b.accountNumber, resolved.accountName, b.nickname ?? null],
+    );
+    reply.status(201);
+    return { id: r.rows[0].id, accountName: resolved.accountName };
+  });
+
+  app.post("/v1/wallet/beneficiaries/:id/delete", { preHandler: auth }, async (req) => {
+    const { id } = parse(z.object({ id: uuidSchema }), req.params);
+    const r = await db.query("DELETE FROM beneficiaries WHERE id=$1 AND user_id=$2", [id, currentUser(req).id]);
+    if (!r.rowCount) throw notFound();
+    return { ok: true };
+  });
+
+  // ---------- Receipts ----------
+
+  app.get("/v1/wallet/transactions/:id", { preHandler: auth }, async (req) => {
+    const { id } = parse(z.object({ id: uuidSchema }), req.params);
+    const me = currentUser(req);
+    const j = (await db.query<{ id: string; type: string; description: string; meta: Record<string, unknown>; created_at: Date }>("SELECT id, type, description, meta, created_at FROM journals WHERE id=$1 AND user_id=$2", [id, me.id])).rows[0];
+    if (!j) throw notFound("Transaction not found");
+    const legs = await db.query<{ asset: Asset; amount: string }>(
+      "SELECT a.asset, p.amount::text FROM postings p JOIN ledger_accounts a ON a.id=p.account_id WHERE p.journal_id=$1 AND a.owner_id=$2 ORDER BY p.id",
+      [id, me.id],
+    );
+    const w = await db.query("SELECT bank_code, account_number, account_name, status, fee, failure_reason FROM withdrawals WHERE journal_id=$1", [id]);
+    const meta = { ...j.meta };
+    delete meta.reference;
+    return {
+      reference: `WS-${j.id.slice(0, 8).toUpperCase()}`,
+      id: j.id,
+      type: j.type,
+      description: j.description,
+      createdAt: j.created_at,
+      status: w.rows[0]?.status ?? "completed",
+      changes: legs.rows.map((l) => ({ asset: l.asset, amount: fromMinor(BigInt(l.amount), l.asset) })),
+      details: {
+        ...meta,
+        ...(w.rows[0]
+          ? { beneficiary: w.rows[0].account_name, bankCode: w.rows[0].bank_code, account: `******${String(w.rows[0].account_number).slice(-4)}`, fee: fromMinor(BigInt(w.rows[0].fee), "NGN"), failureReason: w.rows[0].failure_reason }
+          : {}),
+      },
+    };
+  });
 
   /** Bank-partner webhook. Authenticated by HMAC-SHA256 of the raw body; idempotent on reference. */
   app.post("/v1/webhooks/deposits", async (req) => {
@@ -163,11 +248,12 @@ export async function buildWallet(deps: WalletDeps) {
   if (deps.sandbox) {
     /** Sandbox only: simulates the bank calling our webhook for the caller's own account. */
     app.post("/v1/sandbox/deposits", { preHandler: auth }, async (req) => {
-      const { amount } = parse(z.object({ amount: amountSchema }), req.body);
-      if (toMinor(amount, "NGN") > 10_000_000_00n) throw badRequest("too_large", "Sandbox deposits are capped at 10,000,000");
-      const va = (await db.query<{ account_number: string }>("SELECT account_number FROM virtual_accounts WHERE user_id=$1", [currentUser(req).id])).rows[0];
+      const { amount, currency } = parse(z.object({ amount: amountSchema, currency: z.enum(["NGN", "USD"]).default("NGN") }), req.body);
+      if (toMinor(amount, currency) > (currency === "USD" ? 10_000_00n : 10_000_000_00n)) throw badRequest("too_large", "Sandbox deposit is too large");
+      const table = currency === "USD" ? "usd_accounts" : "virtual_accounts";
+      const va = (await db.query<{ account_number: string }>(`SELECT account_number FROM ${table} WHERE user_id=$1`, [currentUser(req).id])).rows[0];
       if (!va) throw badRequest("no_virtual_account", "Open your deposit account first");
-      const body = JSON.stringify({ event: "deposit.succeeded", reference: `sbx_${randomToken(9)}`, accountNumber: va.account_number, amount, currency: "NGN", senderName: "Sandbox Sender" });
+      const body = JSON.stringify({ event: "deposit.succeeded", reference: `sbx_${randomToken(9)}`, accountNumber: va.account_number, amount, currency, senderName: currency === "USD" ? "Sandbox Client Inc." : "Sandbox Sender" });
       const res = await app.inject({ method: "POST", url: "/v1/webhooks/deposits", payload: body, headers: { "content-type": "application/json", "x-signature": hmacSign(deps.webhookSecret, body) } });
       if (res.statusCode !== 200) throw new AppError(res.statusCode, "sandbox_failed", res.json().error?.message ?? "Sandbox deposit failed");
       return { ok: true };

@@ -45,3 +45,18 @@ The marketing site is a static export (CDN-friendly) using `motion` for animatio
 
 ## ADR-011 — CI/CD: GitHub Actions per component, tag-based releases (2026-11-16)
 Workflows: `backend` (typecheck, tests against Postgres, gateway smoke test, image build + Trivy), `mobile` (analyze, test, release APK, unsigned iOS), `web` (typecheck + build both apps), `security` (gitleaks, npm audit, CodeQL), `release` (tag `<service>-vX.Y.Z` → signed-provenance image to GHCR behind a `production` environment). The deploy target is undecided (PLAN phase 4).
+
+## ADR-012 — Convert through Naira, NGN as the default target (2026-11-17)
+Every asset is priced in kobo per unit with the platform spread (crypto: per-pair spreads; USD: admin FX rate ± FX spread; NGN: 1:1). A conversion sells `from` at its sell price and buys `to` at its buy price, rounding down at each step (exact-target quotes round the source up), so the platform is never short and money is never created. The owner asked for "currency of choice, Naira default".
+
+## ADR-013 — Gift cards as their own service, codes encrypted, humans approve (2026-11-17)
+Gift-card fraud (stolen or already-redeemed cards) is the main risk, so a person must approve every sell before Naira moves. Codes are AES-256-GCM encrypted with a key only the gift-card service holds, decrypted only on the admin review endpoint, and every view is audited. A hash of brand+code is unique, so a card can only ever be submitted once. Photos are accepted only if their bytes are JPEG/PNG. Buying uses a sandbox supplier until a real one is contracted.
+
+## ADR-014 — Bill payments: debit first, vend, refund on failure (2026-11-17)
+The bills service debits the wallet (idempotent on payment id), calls the biller, and posts a full refund journal if the vend fails. Plan prices come from the server catalogue, never from the client. A separate `pay` PIN scope keeps a withdrawal PIN token from authorising a bill.
+
+## ADR-015 — Admin two-factor sign-in (2026-11-17)
+TOTP (RFC 6238, SHA-1, 30 s, ±1 step) implemented in `@willspot/common` with no new dependency and tested against the RFC vectors. Secrets are encrypted at rest; each code works once. Sessions carry an `mfa` claim through refresh. With `ADMIN_REQUIRE_MFA=1` every admin route requires it; the identity service refuses to start in production without it.
+
+## ADR-016 — Trade settlement retry instead of failing on transport errors (2026-11-17)
+When the wallet can't be reached mid-trade, the order/conversion is stored as `pending_settlement` (HTTP 202) and a retrier re-posts every 15 s with the same idempotency key. Business refusals (insufficient funds) stay final. A full outbox/event bus is still possible later; this closes the phase-1 gap without one.

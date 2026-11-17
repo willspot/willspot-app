@@ -19,3 +19,10 @@ keys/
 
 # Third-party page captures used for the analysis; kept local, never published with the product
 docs/evidence/
+
+# Compiler output must never sit next to sources (it shadows the .ts files)
+backend/packages/*/src/**/*.js
+backend/services/*/src/**/*.js
+backend/**/*.d.ts
+backend/**/*.js.map
+*.tsbuildinfo

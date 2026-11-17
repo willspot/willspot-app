@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [needTotp, setNeedTotp] = useState(false);
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -15,9 +16,14 @@ export default function Login() {
     setBusy(true);
     setError(null);
     try {
-      await api("/api/auth/login", { email: f.get("email"), password: f.get("password") });
+      await api("/api/auth/login", { email: f.get("email"), password: f.get("password"), totp: f.get("totp") || undefined });
       location.href = "/";
     } catch (err) {
+      if ((err as { code?: string }).code === "totp_required") {
+        setNeedTotp(true);
+        setError(null);
+        return;
+      }
       setError((err as Error).message);
     } finally {
       setBusy(false);
@@ -50,6 +56,12 @@ export default function Login() {
           Password
           <input name="password" type="password" autoComplete="current-password" required />
         </label>
+        {needTotp && (
+          <motion.label initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}>
+            Authenticator code
+            <input name="totp" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" autoFocus required />
+          </motion.label>
+        )}
         {error && (
           <motion.div className="error" initial={{ x: -8 }} animate={{ x: [8, -6, 4, 0] }}>
             {error}

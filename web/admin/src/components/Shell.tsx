@@ -13,10 +13,13 @@ const NAV = [
   ["/kyc", "KYC review"],
   ["/transactions", "Ledger"],
   ["/withdrawals", "Withdrawals"],
-  ["/trade", "Rates & pairs"],
+  ["/giftcards", "Gift cards"],
+  ["/bills", "Bill payments"],
+  ["/trade", "Rates & convert"],
   ["/branding", "Branding"],
   ["/flags", "Feature flags"],
   ["/audit", "Audit log"],
+  ["/security", "Security (2FA)"],
 ] as const;
 
 const ToastCtx = createContext<(msg: string) => void>(() => {});

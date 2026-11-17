@@ -6,7 +6,12 @@ import '../../core/money.dart';
 import '../../ui/motion.dart';
 import '../../ui/widgets.dart';
 import '../auth/set_pin_screen.dart';
+import '../bills/bills_screen.dart';
 import '../common/coming_soon.dart';
+import '../convert/convert_screen.dart';
+import '../giftcards/giftcards_screen.dart';
+import '../receipt/receipt_screen.dart';
+import '../wallet/usd_account_screen.dart';
 import '../kyc/kyc_screen.dart';
 import '../trade/trade_screen.dart';
 import '../wallet/deposit_screen.dart';
@@ -69,13 +74,13 @@ class HomeScreenState extends State<HomeScreen> {
     final actions = <(IconData, String, VoidCallback)>[
       (Icons.south_west_rounded, 'Add money', () => _open(const DepositScreen())),
       (Icons.north_east_rounded, 'Withdraw', () => _open(const WithdrawScreen())),
+      (Icons.currency_exchange_rounded, 'Convert', () => _open(const ConvertScreen())),
       (Icons.add_chart_rounded, 'Buy crypto', () => _open(const TradeScreen(asset: 'USDT', side: 'buy'))),
-      (Icons.sell_outlined, 'Sell crypto', () => _open(const TradeScreen(asset: 'USDT', side: 'sell'))),
     ];
-    final extras = <(IconData, String, String)>[
-      (Icons.card_giftcard_rounded, 'Gift cards', 'gift_cards'),
-      (Icons.attach_money_rounded, 'USD account', 'usd_account'),
-      (Icons.receipt_rounded, 'Pay bills', 'bill_payments'),
+    final extras = <(IconData, String, String, Widget)>[
+      (Icons.card_giftcard_rounded, 'Gift cards', 'gift_cards', const GiftCardsScreen()),
+      (Icons.attach_money_rounded, 'USD account', 'usd_account', const UsdAccountScreen()),
+      (Icons.receipt_rounded, 'Pay bills', 'bill_payments', const BillsScreen()),
     ];
 
     return SafeArea(
@@ -125,7 +130,7 @@ class HomeScreenState extends State<HomeScreen> {
                     : AnimatedAmount(amount: _bal('NGN'), asset: 'NGN', hidden: _hidden, style: const TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 18),
                 Row(children: [
-                  for (final a in ['USDT', 'BTC', 'ETH'])
+                  for (final a in [if (state.flag('usd_account')) 'USD', 'USDT', 'BTC', 'ETH'])
                     Container(
                       margin: const EdgeInsets.only(right: 8),
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -167,7 +172,7 @@ class HomeScreenState extends State<HomeScreen> {
                 Padding(
                   padding: const EdgeInsets.only(right: 12),
                   child: PressScale(
-                    onTap: () => _open(ComingSoonScreen(title: e.$2, icon: e.$1, enabled: state.flag(e.$3))),
+                    onTap: () => _open(state.flag(e.$3) ? e.$4 : ComingSoonScreen(title: e.$2, icon: e.$1, enabled: false)),
                     child: Container(
                       width: 140,
                       padding: const EdgeInsets.all(14),
@@ -230,6 +235,11 @@ class TxnTile extends StatelessWidget {
     'withdrawal_reversal': Icons.undo_rounded,
     'crypto_buy': Icons.add_chart_rounded,
     'crypto_sell': Icons.sell_outlined,
+    'convert': Icons.currency_exchange_rounded,
+    'giftcard_sell': Icons.card_giftcard_rounded,
+    'giftcard_buy': Icons.shopping_bag_outlined,
+    'bill_payment': Icons.receipt_rounded,
+    'bill_refund': Icons.undo_rounded,
   };
 
   @override
@@ -241,6 +251,7 @@ class TxnTile extends StatelessWidget {
     final positive = !amount.startsWith('-');
     final when = DateTime.tryParse(t['createdAt'] as String? ?? '')?.toLocal();
     return ListTile(
+      onTap: () => Navigator.push(context, fadeRoute(ReceiptScreen(id: t['id'] as String))),
       contentPadding: const EdgeInsets.symmetric(horizontal: 4),
       leading: CircleAvatar(backgroundColor: cs.surfaceContainerHighest, child: Icon(_icons[t['type']] ?? Icons.swap_horiz, color: cs.primary, size: 20)),
       title: Text(t['description'] as String? ?? '', maxLines: 1, overflow: TextOverflow.ellipsis),

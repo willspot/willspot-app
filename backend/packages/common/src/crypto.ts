@@ -1,4 +1,29 @@
-import { createHash, createHmac, randomBytes, randomInt, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomInt, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
+
+/**
+ * Field encryption (AES-256-GCM) for secrets the business must read back later,
+ * e.g. gift-card codes. Key: 32 random bytes, base64. Output: v1.<iv>.<tag>.<ciphertext>.
+ */
+export class FieldCipher {
+  private readonly key: Buffer;
+  constructor(keyB64: string) {
+    this.key = Buffer.from(keyB64, "base64");
+    if (this.key.length !== 32) throw new Error("FieldCipher key must be 32 bytes (base64)");
+  }
+  encrypt(plain: string): string {
+    const iv = randomBytes(12);
+    const c = createCipheriv("aes-256-gcm", this.key, iv);
+    const ct = Buffer.concat([c.update(plain, "utf8"), c.final()]);
+    return ["v1", iv.toString("base64url"), c.getAuthTag().toString("base64url"), ct.toString("base64url")].join(".");
+  }
+  decrypt(blob: string): string {
+    const [v, iv, tag, ct] = blob.split(".");
+    if (v !== "v1" || !iv || !tag || !ct) throw new Error("bad ciphertext");
+    const d = createDecipheriv("aes-256-gcm", this.key, Buffer.from(iv, "base64url"));
+    d.setAuthTag(Buffer.from(tag, "base64url"));
+    return Buffer.concat([d.update(Buffer.from(ct, "base64url")), d.final()]).toString("utf8");
+  }
+}
 
 // OWASP Password Storage Cheat Sheet: scrypt N=2^17, r=8, p=1.
 const SCRYPT = { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };

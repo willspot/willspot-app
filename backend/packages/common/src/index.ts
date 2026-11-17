@@ -8,3 +8,4 @@ export * from "./crypto.js";
 export * from "./internal.js";
 export * from "./flags.js";
 export * from "./brand.js";
+export * from "./totp.js";

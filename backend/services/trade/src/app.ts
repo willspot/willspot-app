@@ -24,7 +24,9 @@ import {
   type Asset,
   type Db,
 } from "@willspot/common";
+import { conversionView, registerConvert } from "./convert.js";
 import type { MarketProvider } from "./market.js";
+import { settle } from "./settlement.js";
 
 export interface LedgerClient {
   post(body: {
@@ -191,39 +193,27 @@ export async function buildTrade(deps: TradeDeps) {
 
     const ngn = BigInt(q.ngn_amount);
     const units = BigInt(q.asset_amount);
-    const sign = q.side === "buy" ? 1n : -1n;
-    const legs = [
-      { code: `user:${me.id}:NGN`, asset: "NGN", amount: (-sign * ngn).toString() },
-      { code: "sys:trade:NGN", asset: "NGN", amount: (sign * ngn).toString() },
-      { code: `sys:trade:${q.asset}`, asset: q.asset, amount: (-sign * units).toString() },
-      { code: `user:${me.id}:${q.asset}`, asset: q.asset, amount: (sign * units).toString() },
-    ];
-    let journalId: string | null = null;
-    let failure: string | null = null;
-    try {
-      journalId = (
-        await deps.ledger.post({
-          idempotencyKey: `quote:${quoteId}`,
-          type: q.side === "buy" ? "crypto_buy" : "crypto_sell",
-          userId: me.id,
-          description: `${q.side === "buy" ? "Bought" : "Sold"} ${fromMinor(units, q.asset)} ${q.asset}`,
-          meta: { quoteId, price: fromMinor(BigInt(q.price), "NGN") },
-          legs,
-        })
-      ).journalId;
-    } catch (e) {
-      if (e instanceof AppError && e.status < 500) failure = e.code;
-      else throw e; // ledger unreachable: quote stays used; the idempotent retry path is phase 2 (docs/PLAN.md)
-    }
+    const buy = q.side === "buy";
+    const r = await settle(deps.ledger, {
+      idempotencyKey: `quote:${quoteId}`,
+      type: buy ? "crypto_buy" : "crypto_sell",
+      userId: me.id,
+      description: `${buy ? "Bought" : "Sold"} ${fromMinor(units, q.asset)} ${q.asset}`,
+      meta: { quoteId, price: fromMinor(BigInt(q.price), "NGN") },
+      giveAsset: buy ? "NGN" : q.asset,
+      give: buy ? ngn : units,
+      getAsset: buy ? q.asset : "NGN",
+      get: buy ? units : ngn,
+    });
     const o = (
       await db.query(
         "INSERT INTO orders(quote_id, user_id, asset, side, price, ngn_amount, asset_amount, status, journal_id, failure) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *",
-        [quoteId, me.id, q.asset, q.side, q.price, q.ngn_amount, q.asset_amount, failure ? "failed" : "completed", journalId, failure],
+        [quoteId, me.id, q.asset, q.side, q.price, q.ngn_amount, q.asset_amount, r.status, r.status === "completed" ? r.journalId : null, r.status === "failed" ? r.failure : null],
       )
     ).rows[0];
-    if (failure === "insufficient_funds") throw new AppError(422, "insufficient_funds", "Insufficient balance");
-    if (failure) throw new AppError(422, failure, "Order failed");
-    reply.status(201);
+    if (r.status === "failed") throw new AppError(422, r.failure, r.failure === "insufficient_funds" ? "Insufficient balance" : "Order failed");
+    // pending_settlement: accepted, the retrier completes it with the same idempotency key.
+    reply.status(r.status === "completed" ? 201 : 202);
     return orderView(o);
   });
 
@@ -248,8 +238,10 @@ export async function buildTrade(deps: TradeDeps) {
 
   app.get("/v1/admin/trade/pairs", admin, async () => {
     const usdNgn = fromMinor(await usdNgnKobo(), "NGN");
+    const spread = (await db.query<{ value: string }>("SELECT value FROM settings WHERE key='usd_fx_spread_bps'")).rows[0]?.value ?? "100";
     return {
       usdNgn,
+      usdFxSpreadBps: Number(spread),
       items: (await pairs()).map((p) => ({ asset: p.asset, name: p.name, enabled: p.enabled, buySpreadBps: p.buy_spread_bps, sellSpreadBps: p.sell_spread_bps, minNgn: fromMinor(BigInt(p.min_ngn), "NGN"), maxNgn: fromMinor(BigInt(p.max_ngn), "NGN") })),
     };
   });
@@ -275,6 +267,20 @@ export async function buildTrade(deps: TradeDeps) {
     await db.query("INSERT INTO audit_log(actor_id, action, target, meta) VALUES ($1,'fx.updated','usd_ngn',$2)", [currentUser(req).id, { usdNgn }]);
     return { ok: true };
   });
+
+  app.post("/v1/admin/trade/fx-spread", admin, async (req) => {
+    const { bps } = parse(z.object({ bps: z.number().int().min(0).max(2000) }), req.body);
+    await db.query("UPDATE settings SET value=$1, updated_at=now() WHERE key='usd_fx_spread_bps'", [String(bps)]);
+    await db.query("INSERT INTO audit_log(actor_id, action, target, meta) VALUES ($1,'fx_spread.updated','usd',$2)", [currentUser(req).id, { bps }]);
+    return { ok: true };
+  });
+
+  app.get("/v1/admin/trade/conversions", admin, async () => {
+    const r = await db.query("SELECT * FROM conversions ORDER BY created_at DESC LIMIT 100");
+    return { items: r.rows.map((c) => ({ ...conversionView(c), userId: c.user_id })) };
+  });
+
+  registerConvert(app, deps, auth);
 
   app.get("/v1/admin/trade/orders", admin, async () => {
     const r = await db.query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 100");

@@ -16,7 +16,7 @@ beforeAll(async () => {
   const addr = upstream.server.address() as { port: number };
   const url = `http://127.0.0.1:${addr.port}`;
   gw = await buildGateway({
-    upstreams: { identity: url, wallet: url, trade: url, config: url },
+    upstreams: { identity: url, wallet: url, trade: url, config: url, giftcards: url, bills: url },
     corsOrigins: ["https://app.willspot.test"],
     rateLimit: { general: 1000, strict: 3 },
     logger: false,
@@ -35,6 +35,8 @@ describe("gateway", () => {
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ path: "/v1/webhooks/deposits", raw: body, requestId: "req-12345678" });
     expect((await gw.inject({ method: "GET", url: "/v1/trade/markets" })).json().path).toBe("/v1/trade/markets");
+    expect((await gw.inject({ method: "GET", url: "/v1/giftcards/brands" })).json().path).toBe("/v1/giftcards/brands");
+    expect((await gw.inject({ method: "GET", url: "/v1/bills/billers" })).json().path).toBe("/v1/bills/billers");
   });
 
   it("never exposes internal routes or unknown paths", async () => {

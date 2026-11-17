@@ -29,7 +29,7 @@ describe("config service", () => {
     const r = await app.inject({ method: "GET", url: "/v1/config/public" });
     expect(r.statusCode).toBe(200);
     expect(r.json().brand.name).toBe("WillSpot");
-    expect(r.json().flags.gift_cards).toBe(false);
+    expect(r.json().flags.gift_cards).toBe(true); // phase 2: gift cards built and on by default (brand/brand.json)
     expect(r.headers["cache-control"]).toBe("public, max-age=60");
     const again = await app.inject({ method: "GET", url: "/v1/config/public", headers: { "if-none-match": String(r.headers.etag) } });
     expect(again.statusCode).toBe(304);

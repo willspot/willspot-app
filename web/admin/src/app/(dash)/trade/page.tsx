@@ -5,10 +5,13 @@ import { Header, useLoad, useToast } from "@/components/Shell";
 import { api, naira } from "@/lib/api";
 
 interface Pair { asset: string; name: string; enabled: boolean; buySpreadBps: number; sellSpreadBps: number; minNgn: string; maxNgn: string }
+interface Conversion { id: string; from: string; to: string; fromAmount: string; toAmount: string; rate: string; status: string; createdAt: string }
 interface Market { asset: string; buyPrice: string; sellPrice: string }
 
 export default function Trade() {
-  const { data, reload } = useLoad<{ usdNgn: string; items: Pair[] }>("/v1/admin/trade/pairs");
+  const { data, reload } = useLoad<{ usdNgn: string; usdFxSpreadBps: number; items: Pair[] }>("/v1/admin/trade/pairs");
+  const conversions = useLoad<{ items: Conversion[] }>("/v1/admin/trade/conversions");
+  const [spread, setSpread] = useState("100");
   const markets = useLoad<{ items: Market[] }>("/v1/trade/markets");
   const [fx, setFx] = useState("");
   const [edits, setEdits] = useState<Record<string, Pair>>({});
@@ -17,6 +20,7 @@ export default function Trade() {
   useEffect(() => {
     if (data) {
       setFx(data.usdNgn);
+      setSpread(String(data.usdFxSpreadBps));
       setEdits(Object.fromEntries(data.items.map((p) => [p.asset, p])));
     }
   }, [data]);
@@ -56,6 +60,23 @@ export default function Trade() {
         >
           Save rate
         </button>
+        <label style={{ width: 200 }}>
+          USD buy/sell spread (bps)
+          <input type="number" min={0} max={2000} value={spread} onChange={(e) => setSpread(e.target.value)} />
+        </label>
+        <button
+          className="btn secondary"
+          onClick={async () => {
+            try {
+              await api("/v1/admin/trade/fx-spread", { bps: Number(spread) });
+              toast("USD spread updated");
+            } catch (e) {
+              toast((e as Error).message);
+            }
+          }}
+        >
+          Save spread
+        </button>
       </div>
       <div className="grid stats">
         {Object.values(edits).map((p) => {
@@ -77,6 +98,23 @@ export default function Trade() {
             </div>
           );
         })}
+      </div>
+          <div className="card table-wrap" style={{ marginTop: 16 }}>
+        <h2>Recent conversions</h2>
+        <table>
+          <thead><tr><th>When</th><th>From</th><th>To</th><th>Rate</th><th>Status</th></tr></thead>
+          <tbody>
+            {conversions.data?.items.map((c) => (
+              <tr key={c.id}>
+                <td>{new Date(c.createdAt).toLocaleString("en-NG")}</td>
+                <td>{c.fromAmount} {c.from}</td>
+                <td>{c.toAmount} {c.to}</td>
+                <td>{c.rate}</td>
+                <td><span className={`badge ${c.status === "completed" ? "ok" : c.status === "failed" ? "bad" : "warn"}`}>{c.status}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </>
   );

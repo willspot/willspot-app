@@ -4,7 +4,7 @@ import { build } from "esbuild";
 import { cpSync, existsSync, rmSync } from "node:fs";
 
 const service = process.argv[2];
-const known = ["gateway", "identity", "wallet", "trade", "config"];
+const known = ["gateway", "identity", "wallet", "trade", "config", "giftcards", "bills"];
 if (!known.includes(service)) {
   console.error(`usage: node scripts/build.mjs <${known.join("|")}>`);
   process.exit(2);

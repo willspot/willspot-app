@@ -2,12 +2,15 @@ import cors from "@fastify/cors";
 import proxy from "@fastify/http-proxy";
 import rateLimit from "@fastify/rate-limit";
 import { createApp } from "@willspot/common";
+import { Redis } from "ioredis";
 
 export interface Upstreams {
   identity: string;
   wallet: string;
   trade: string;
   config: string;
+  giftcards: string;
+  bills: string;
 }
 
 /**
@@ -30,6 +33,10 @@ export const ROUTES: { prefix: string; to: keyof Upstreams; strict?: boolean }[]
   { prefix: "/v1/admin/trade", to: "trade" },
   { prefix: "/v1/config", to: "config" },
   { prefix: "/v1/admin/config", to: "config" },
+  { prefix: "/v1/giftcards", to: "giftcards" },
+  { prefix: "/v1/admin/giftcards", to: "giftcards" },
+  { prefix: "/v1/bills", to: "bills" },
+  { prefix: "/v1/admin/bills", to: "bills" },
 ];
 
 export interface GatewayOptions {
@@ -37,11 +44,14 @@ export interface GatewayOptions {
   corsOrigins: string[];
   /** Requests per minute per client IP: general routes / sign-in and KYC routes. */
   rateLimit?: { general: number; strict: number };
+  /** Shared rate-limit store so limits hold across gateway replicas. In-memory when absent. */
+  redisUrl?: string;
   logger?: boolean;
 }
 
 export async function buildGateway(opts: GatewayOptions) {
-  const app = await createApp("gateway", { logger: opts.logger, bodyLimit: 1024 * 1024, rawBody: false });
+  // 2.5 MB at the edge for gift-card photos; every service still enforces its own (smaller) limit.
+  const app = await createApp("gateway", { logger: opts.logger, bodyLimit: 2_500_000, rawBody: false });
   const limits = opts.rateLimit ?? { general: 300, strict: 20 };
 
   await app.register(cors, {
@@ -53,8 +63,14 @@ export async function buildGateway(opts: GatewayOptions) {
     maxAge: 600,
   });
 
-  // In-memory per replica for the MVP; a shared Redis store is phase 2 (docs/PLAN.md).
-  await app.register(rateLimit, { global: true, max: limits.general, timeWindow: "1 minute" });
+  const redis = opts.redisUrl ? new Redis(opts.redisUrl, { connectTimeout: 500, maxRetriesPerRequest: 1, enableOfflineQueue: false }) : undefined;
+  if (redis) app.addHook("onClose", async () => void redis.disconnect());
+  await app.register(rateLimit, {
+    global: true,
+    max: limits.general,
+    timeWindow: "1 minute",
+    ...(redis ? { redis, nameSpace: "ws-rl:", skipOnError: true } : {}),
+  });
 
   for (const r of ROUTES) {
     await app.register(proxy, {

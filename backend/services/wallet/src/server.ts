@@ -25,7 +25,7 @@ const app = await buildWallet({
   flags: new FlagsClient(config),
   webhookSecret: env("DEPOSIT_WEBHOOK_SECRET"),
   sandbox,
-  serviceTokens: { trade: process.env.SERVICE_TOKEN_TRADE },
+  serviceTokens: { trade: process.env.SERVICE_TOKEN_TRADE, giftcards: process.env.SERVICE_TOKEN_GIFTCARDS, bills: process.env.SERVICE_TOKEN_BILLS },
 });
 
 await app.listen({ host: env("HOST", "0.0.0.0"), port: Number(env("PORT", "4002")) });

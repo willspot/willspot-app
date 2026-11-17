@@ -7,7 +7,7 @@ Admin dashboard → **Branding**: name, tagline, logo URLs, 10 colours, heading/
 - The mobile app picks it up on next launch. The website picks it up on page load.
 - Logo URLs must be `https://…` or a site path like `/brand/logo.svg`. The app shows PNG/JPG logos from a URL; otherwise it draws the built-in mark.
 
-Admin dashboard → **Feature flags**: switch sign-ups, deposits, withdrawals, crypto trading on or off. The services enforce this within 30 seconds, not only the screens. Gift cards, USD account and bills are **not built yet**; keep them off.
+Admin dashboard → **Feature flags**: switch sign-ups, deposits, withdrawals, crypto trading, gift cards, USD account and bill payments on or off. The services enforce this within 30 seconds, not only the screens. Gift cards, USD and bills run on sandbox providers until real partners are connected.
 
 ## 2. In the code (defaults for new installs)
 | File | What it controls |
