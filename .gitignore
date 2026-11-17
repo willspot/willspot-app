@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.next/
+out/
+coverage/
+.dart_tool/
+build/
+.flutter-plugins*
+*.iml
+.idea/
+.pgdata/
+keys/
+.pgdata/
+
+# Third-party page captures used for the analysis; kept local, never published with the product
+docs/evidence/

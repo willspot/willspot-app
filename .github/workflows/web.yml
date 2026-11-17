@@ -1,0 +1,43 @@
+name: web
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", "brand/**", ".github/workflows/web.yml"]
+  pull_request:
+    paths: ["web/**", "brand/**", ".github/workflows/web.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [site, admin]
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: node scripts/sync-brand.mjs
+      - run: npm run typecheck -w ${{ matrix.app }}
+      - run: npm run build -w ${{ matrix.app }}
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.API_URL || 'https://api.example.com' }}
+      - uses: actions/upload-artifact@v4
+        if: matrix.app == 'site'
+        with:
+          name: site
+          path: web/site/out

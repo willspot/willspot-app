@@ -1,0 +1,95 @@
+import cors from "@fastify/cors";
+import proxy from "@fastify/http-proxy";
+import rateLimit from "@fastify/rate-limit";
+import { createApp } from "@willspot/common";
+
+export interface Upstreams {
+  identity: string;
+  wallet: string;
+  trade: string;
+  config: string;
+}
+
+/**
+ * Public route table. Only these prefixes reach a service; anything else,
+ * including every /internal route, gets a 404 at the edge.
+ */
+export const ROUTES: { prefix: string; to: keyof Upstreams; strict?: boolean }[] = [
+  { prefix: "/v1/auth", to: "identity", strict: true },
+  { prefix: "/v1/me", to: "identity" },
+  { prefix: "/v1/kyc", to: "identity", strict: true },
+  { prefix: "/v1/admin/users", to: "identity" },
+  { prefix: "/v1/admin/kyc", to: "identity" },
+  { prefix: "/v1/admin/stats", to: "identity" },
+  { prefix: "/v1/admin/audit", to: "identity" },
+  { prefix: "/v1/wallet", to: "wallet" },
+  { prefix: "/v1/webhooks", to: "wallet" },
+  { prefix: "/v1/sandbox", to: "wallet" },
+  { prefix: "/v1/admin/wallet", to: "wallet" },
+  { prefix: "/v1/trade", to: "trade" },
+  { prefix: "/v1/admin/trade", to: "trade" },
+  { prefix: "/v1/config", to: "config" },
+  { prefix: "/v1/admin/config", to: "config" },
+];
+
+export interface GatewayOptions {
+  upstreams: Upstreams;
+  corsOrigins: string[];
+  /** Requests per minute per client IP: general routes / sign-in and KYC routes. */
+  rateLimit?: { general: number; strict: number };
+  logger?: boolean;
+}
+
+export async function buildGateway(opts: GatewayOptions) {
+  const app = await createApp("gateway", { logger: opts.logger, bodyLimit: 1024 * 1024, rawBody: false });
+  const limits = opts.rateLimit ?? { general: 300, strict: 20 };
+
+  await app.register(cors, {
+    origin: (origin, cb) => cb(null, !origin || opts.corsOrigins.includes(origin)),
+    credentials: false,
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["authorization", "content-type", "x-step-up", "x-request-id", "if-none-match"],
+    exposedHeaders: ["x-request-id", "etag"],
+    maxAge: 600,
+  });
+
+  // In-memory per replica for the MVP; a shared Redis store is phase 2 (docs/PLAN.md).
+  await app.register(rateLimit, { global: true, max: limits.general, timeWindow: "1 minute" });
+
+  for (const r of ROUTES) {
+    await app.register(proxy, {
+      upstream: opts.upstreams[r.to],
+      prefix: r.prefix,
+      rewritePrefix: r.prefix,
+      http2: false,
+      config: r.strict ? { rateLimit: { max: limits.strict, timeWindow: "1 minute" } } : {},
+      replyOptions: {
+        rewriteRequestHeaders: (req, headers) => ({ ...headers, "x-request-id": req.id, "x-forwarded-for": req.ip }),
+        rewriteHeaders: (headers) => {
+          const h = { ...headers };
+          delete h["x-powered-by"];
+          delete h.server;
+          return h;
+        },
+      },
+    });
+  }
+
+  app.get("/readyz", async (_req, reply) => {
+    const checks = await Promise.all(
+      Object.entries(opts.upstreams).map(async ([name, url]) => {
+        try {
+          const r = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(2000) });
+          return [name, r.ok] as const;
+        } catch {
+          return [name, false] as const;
+        }
+      }),
+    );
+    const ok = checks.every(([, v]) => v);
+    reply.status(ok ? 200 : 503);
+    return { status: ok ? "ok" : "degraded", services: Object.fromEntries(checks) };
+  });
+
+  return app;
+}

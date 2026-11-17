@@ -1,0 +1,22 @@
+{
+  "name": "@willspot/admin",
+  "private": true,
+  "scripts": {
+    "dev": "node ../scripts/sync-brand.mjs && next dev -p 3001",
+    "build": "node ../scripts/sync-brand.mjs && next build",
+    "start": "next start -p 3001",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "16.4.6",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "motion": "14.14.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/node": "26.6.6"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "willspot-web",
+  "private": true,
+  "workspaces": [
+    "site",
+    "admin"
+  ],
+  "scripts": {
+    "sync-brand": "node scripts/sync-brand.mjs",
+    "build": "npm run sync-brand && npm run build -w site && npm run build -w admin",
+    "typecheck": "npm run typecheck -w site && npm run typecheck -w admin"
+  }
+}

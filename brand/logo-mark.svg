@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="WillSpot">
+  <!-- Placeholder WillSpot mark: a location spot with a "W" check stroke. Replace freely. -->
+  <defs>
+    <linearGradient id="ws-g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5B3DF5"/>
+      <stop offset="1" stop-color="#00C2A8"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#ws-g)"/>
+  <path d="M14 22 L22 44 L32 28 L42 44 L50 22" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="50" cy="14" r="5" fill="#FFB020"/>
+</svg>

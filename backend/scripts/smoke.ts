@@ -1,0 +1,81 @@
+/**
+ * End-to-end smoke test through the gateway against a running stack:
+ * sign up -> OTP -> PIN -> BVN -> deposit account -> sandbox deposit ->
+ * buy USDT -> withdraw -> history -> admin views.
+ *
+ *   API=http://localhost:8080 ADMIN_EMAIL=... ADMIN_PASSWORD=... npx tsx scripts/smoke.ts
+ */
+import { randomInt, randomUUID } from "node:crypto";
+
+const API = process.env.API ?? "http://localhost:8080";
+let failures = 0;
+
+async function call(method: string, path: string, body?: unknown, token?: string, extra: Record<string, string> = {}) {
+  const r = await fetch(`${API}${path}`, {
+    method,
+    headers: { ...(body ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...extra },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = (await r.json().catch(() => ({}))) as Record<string, any>;
+  return { status: r.status, json, headers: r.headers };
+}
+
+function check(name: string, ok: boolean, detail: unknown = "") {
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : `  ${JSON.stringify(detail)}`}`);
+  if (!ok) failures++;
+}
+
+const ready = await call("GET", "/readyz");
+check("gateway /readyz: all services up", ready.status === 200, ready.json);
+
+const cfg = await call("GET", "/v1/config/public");
+check("public config has brand + flags", !!cfg.json.brand?.name && typeof cfg.json.flags === "object", cfg.json);
+check("no x-powered-by at the edge", cfg.headers.get("x-powered-by") === null);
+
+const phone = `080${randomInt(10_000_000, 99_999_999)}`;
+const email = `smoke+${randomUUID().slice(0, 8)}@example.com`;
+const su = await call("POST", "/v1/auth/signup", { email, phone, password: "SmokeTest123", firstName: "Smoke", lastName: "Tester" });
+check("sign up", su.status === 201 && !!su.json.devOtp, su.json);
+const v = await call("POST", "/v1/auth/verify-otp", { userId: su.json.userId, code: su.json.devOtp });
+check("verify OTP -> tokens", v.status === 200 && !!v.json.accessToken, v.json);
+let token = v.json.accessToken as string;
+
+check("set PIN", (await call("POST", "/v1/me/pin", { pin: "4826", password: "SmokeTest123" }, token)).status === 200);
+const bvn = await call("POST", "/v1/kyc/bvn", { bvn: "22233344455", dob: "1995-05-05" }, token);
+check("BVN (sandbox) -> tier 1", bvn.json.tier === 1, bvn.json);
+token = (await call("POST", "/v1/auth/refresh", { refreshToken: v.json.refreshToken })).json.accessToken;
+
+const va = await call("GET", "/v1/wallet/virtual-account", undefined, token);
+check("deposit account number", /^\d{10}$/.test(va.json.accountNumber ?? ""), va.json);
+check("sandbox deposit 100,000", (await call("POST", "/v1/sandbox/deposits", { amount: "100000" }, token)).status === 200);
+
+const q = await call("POST", "/v1/trade/quotes", { asset: "USDT", side: "buy", amount: "30000", amountIn: "NGN" }, token);
+check("USDT quote", q.status === 201, q.json);
+const stepTrade = (await call("POST", "/v1/me/pin/verify", { pin: "4826", scope: "trade" }, token)).json.stepUpToken;
+const order = await call("POST", "/v1/trade/orders", { quoteId: q.json.quoteId }, token, { "x-step-up": stepTrade });
+check("buy order completed", order.json.status === "completed", order.json);
+
+const stepWd = (await call("POST", "/v1/me/pin/verify", { pin: "4826", scope: "withdraw" }, token)).json.stepUpToken;
+const wd = await call("POST", "/v1/wallet/withdrawals", { amount: "20000", bankCode: "SBX001", accountNumber: "0123456789", idempotencyKey: randomUUID() }, token, { "x-step-up": stepWd });
+check("withdrawal completed", wd.json.status === "completed", wd.json);
+
+const bal = await call("GET", "/v1/wallet/balances", undefined, token);
+const ngn = bal.json.balances?.find((b: { asset: string }) => b.asset === "NGN")?.balance;
+check("NGN balance = 100000 - 30000 - 20000 - 50 fee", ngn === "49950.00", bal.json);
+const hist = await call("GET", "/v1/wallet/transactions", undefined, token);
+check("history has 3 entries", hist.json.items?.length === 3, hist.json);
+
+check("internal routes are not reachable via gateway", (await call("GET", `/internal/users/${su.json.userId}`)).status === 404);
+check("admin routes refuse normal users", (await call("GET", "/v1/admin/wallet/summary", undefined, token)).status === 403);
+
+if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+  const a = await call("POST", "/v1/auth/login", { email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD });
+  check("admin login", !!a.json.accessToken, a.json);
+  const s = await call("GET", "/v1/admin/wallet/summary", undefined, a.json.accessToken);
+  check("admin wallet summary", s.status === 200 && s.json.deposits.count >= 1, s.json);
+  const st = await call("GET", "/v1/admin/stats", undefined, a.json.accessToken);
+  check("admin user stats", st.status === 200 && st.json.users >= 1, st.json);
+}
+
+console.log(failures ? `\n${failures} check(s) failed` : "\nAll smoke checks passed");
+process.exit(failures ? 1 : 0);

@@ -1,0 +1,32 @@
+{
+  "name": "WillSpot",
+  "tagline": "Your money, on the spot.",
+  "logoUrl": "/brand/logo.svg",
+  "logoMarkUrl": "/brand/logo-mark.svg",
+  "colors": {
+    "primary": "#5B3DF5",
+    "primaryDark": "#3E24C9",
+    "secondary": "#00C2A8",
+    "accent": "#FFB020",
+    "background": "#F7F6FB",
+    "surface": "#FFFFFF",
+    "text": "#14121F",
+    "muted": "#6B6880",
+    "success": "#12B76A",
+    "danger": "#E5484D"
+  },
+  "fonts": { "heading": "Space Grotesk", "body": "Inter" },
+  "radius": 16,
+  "support": { "email": "support@example.com" },
+  "social": {},
+  "legal": { "companyName": "WillSpot (placeholder company name)" },
+  "flags": {
+    "signups": true,
+    "deposits": true,
+    "withdrawals": true,
+    "crypto_trading": true,
+    "gift_cards": false,
+    "usd_account": false,
+    "bill_payments": false
+  }
+}

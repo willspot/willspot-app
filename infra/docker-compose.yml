@@ -1,0 +1,88 @@
+# Full WillSpot backend locally:
+#   cd backend && npm run env:init   (once; DB URLs are overridden below for containers)
+#   docker compose -f infra/docker-compose.yml up --build
+# Only the gateway is published to the host. Images copy files in (no bind mounts),
+# so this also works from /Applications/XAMPP where Docker cannot bind-mount.
+
+name: willspot
+
+x-service: &service
+  build:
+    context: ..
+    dockerfile: backend/Dockerfile
+  restart: unless-stopped
+  env_file: ../backend/.env
+  environment: &common-env
+    NODE_ENV: development
+    IDENTITY_INTERNAL_URL: http://identity:4001
+    WALLET_INTERNAL_URL: http://wallet:4002
+    TRADE_INTERNAL_URL: http://trade:4003
+    CONFIG_INTERNAL_URL: http://config:4004
+    IDENTITY_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_identity
+    WALLET_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_wallet
+    TRADE_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_trade
+    CONFIG_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_config
+  depends_on:
+    postgres:
+      condition: service_healthy
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  networks: [internal]
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: willspot
+      POSTGRES_PASSWORD: willspot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    configs:
+      - source: pg_init
+        target: /docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U willspot"]
+      interval: 5s
+      retries: 10
+    networks: [internal]
+
+  config:
+    <<: *service
+    build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: config } }
+    environment: { <<: *common-env, PORT: "4004" }
+
+  identity:
+    <<: *service
+    build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: identity } }
+    environment: { <<: *common-env, PORT: "4001" }
+
+  wallet:
+    <<: *service
+    build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: wallet } }
+    environment: { <<: *common-env, PORT: "4002" }
+
+  trade:
+    <<: *service
+    build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: trade } }
+    environment: { <<: *common-env, PORT: "4003" }
+
+  gateway:
+    <<: *service
+    build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: gateway } }
+    environment: { <<: *common-env, PORT: "8080" }
+    depends_on: [identity, wallet, trade, config]
+    ports: ["8080:8080"]
+    networks: [internal, edge]
+
+configs:
+  pg_init:
+    file: ./postgres-init.sql
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
+    internal: true
+  edge: {}

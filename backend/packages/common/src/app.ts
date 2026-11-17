@@ -1,0 +1,88 @@
+import { randomUUID } from "node:crypto";
+import helmet from "@fastify/helmet";
+import Fastify, { type FastifyInstance } from "fastify";
+import { AppError } from "./errors.js";
+import type { AuthUser } from "./auth.js";
+
+declare module "fastify" {
+  interface FastifyRequest {
+    rawBody?: string;
+    user?: AuthUser;
+  }
+}
+
+export interface AppOptions {
+  /** false disables logging (tests). */
+  logger?: boolean;
+  bodyLimit?: number;
+  /** Keep the raw JSON body on req.rawBody (default true). The gateway streams bodies instead. */
+  rawBody?: boolean;
+}
+
+/**
+ * Every WillSpot service starts from this: security headers, request ids, a body
+ * limit, JSON parsing that keeps the raw body (for webhook HMACs) and rejects
+ * prototype poisoning, uniform error envelopes that never leak stack traces,
+ * and health probes.
+ */
+export async function createApp(service: string, opts: AppOptions = {}): Promise<FastifyInstance> {
+  const app = Fastify({
+    logger:
+      opts.logger === false
+        ? false
+        : {
+            level: process.env.LOG_LEVEL ?? "info",
+            redact: [
+              "req.headers.authorization",
+              "req.headers.cookie",
+              'req.headers["x-step-up"]',
+              'req.headers["x-service-token"]',
+              'req.headers["x-signature"]',
+            ],
+          },
+    bodyLimit: opts.bodyLimit ?? 256 * 1024,
+    genReqId: (req) => {
+      const h = req.headers["x-request-id"];
+      return typeof h === "string" && /^[\w-]{8,64}$/.test(h) ? h : randomUUID();
+    },
+  });
+
+  await app.register(helmet, { contentSecurityPolicy: false, global: true });
+
+  if (opts.rawBody !== false) {
+    const jsonParser = app.getDefaultJsonParser("error", "error");
+    app.removeContentTypeParser("application/json");
+    app.addContentTypeParser("application/json", { parseAs: "string" }, (req, body, done) => {
+      req.rawBody = body as string;
+      if ((body as string).length === 0) return done(null, {});
+      jsonParser(req, body as string, done);
+    });
+  }
+
+  app.addHook("onSend", async (req, reply, payload) => {
+    reply.header("x-request-id", req.id);
+    if (!reply.hasHeader("cache-control")) reply.header("cache-control", "no-store");
+    reply.removeHeader("x-powered-by");
+    return payload;
+  });
+
+  app.setNotFoundHandler((_req, reply) => {
+    reply.status(404).send({ error: { code: "not_found", message: "Route not found" } });
+  });
+
+  app.setErrorHandler((err, req, reply) => {
+    if (err instanceof AppError) {
+      return reply.status(err.status).send({ error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) } });
+    }
+    const e = err as { statusCode?: number; code?: string; message?: string; validation?: unknown };
+    const status = e.statusCode ?? 500;
+    if (status < 500) {
+      return reply.status(status).send({ error: { code: e.validation ? "validation_failed" : (e.code ?? "bad_request").toLowerCase(), message: e.message ?? "Bad request" } });
+    }
+    req.log.error({ err }, "unhandled error");
+    return reply.status(500).send({ error: { code: "internal", message: "Something went wrong" } });
+  });
+
+  app.get("/healthz", async () => ({ status: "ok", service }));
+  return app;
+}

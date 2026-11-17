@@ -1,0 +1,29 @@
+{
+  "name": "willspot-backend",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "env:init": "tsx scripts/gen-env.ts",
+    "dev": "tsx scripts/dev.ts",
+    "db:test:start": "bash scripts/test-db.sh start",
+    "db:test:stop": "bash scripts/test-db.sh stop",
+    "build": "for s in gateway identity wallet trade config; do node scripts/build.mjs $s; done"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0",
+    "esbuild": "0.28.2"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
+  }
+}
