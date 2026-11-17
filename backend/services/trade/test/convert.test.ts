@@ -134,4 +134,11 @@ describe("convert to a currency of choice", () => {
     const list = (await call(trade, "GET", "/v1/trade/conversions", u.token)).json();
     expect(list.items[0].status).toBe("completed");
   });
+
+  it("writes an outbox event for each completed money movement (ADR-021)", async () => {
+    const types = new Set<string>();
+    for (const d of dbs) for (const r of (await d.db.query<{ type: string }>("SELECT type FROM outbox")).rows) types.add(r.type);
+    expect([...types]).toEqual(expect.arrayContaining(["trade.convert_completed"]));
+    console.log("outbox types:", [...types].sort().join(", "));
+  });
 });

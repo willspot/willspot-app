@@ -1,7 +1,7 @@
 import cors from "@fastify/cors";
 import proxy from "@fastify/http-proxy";
 import rateLimit from "@fastify/rate-limit";
-import { createApp } from "@willspot/common";
+import { createApp, traceHeaders } from "@willspot/common";
 import { Redis } from "ioredis";
 
 export interface Upstreams {
@@ -12,6 +12,7 @@ export interface Upstreams {
   giftcards: string;
   bills: string;
   risk: string;
+  notifications: string;
 }
 
 /**
@@ -26,6 +27,9 @@ export const ROUTES: { prefix: string; to: keyof Upstreams; strict?: boolean }[]
   { prefix: "/v1/admin/kyc", to: "identity" },
   { prefix: "/v1/admin/stats", to: "identity" },
   { prefix: "/v1/admin/audit", to: "identity" },
+  { prefix: "/v1/admin/admins", to: "identity" },
+  { prefix: "/v1/notifications", to: "notifications" },
+  { prefix: "/v1/admin/notifications", to: "notifications" },
   { prefix: "/v1/wallet", to: "wallet" },
   { prefix: "/v1/webhooks", to: "wallet" },
   { prefix: "/v1/sandbox", to: "wallet" },
@@ -53,7 +57,25 @@ export interface GatewayOptions {
 
 export async function buildGateway(opts: GatewayOptions) {
   // 2.5 MB at the edge for gift-card photos; every service still enforces its own (smaller) limit.
-  const app = await createApp("gateway", { logger: opts.logger, bodyLimit: 2_500_000, rawBody: false });
+  const app = await createApp("gateway", {
+    logger: opts.logger,
+    bodyLimit: 2_500_000,
+    rawBody: false,
+    trustTraceparent: false,
+    ready: async () => {
+      const checks = await Promise.all(
+        Object.entries(opts.upstreams).map(async ([name, url]) => {
+          try {
+            const r = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(2000) });
+            return [name, r.ok] as const;
+          } catch {
+            return [name, false] as const;
+          }
+        }),
+      );
+      return { ok: checks.every(([, v]) => v), services: Object.fromEntries(checks) };
+    },
+  });
   const limits = opts.rateLimit ?? { general: 300, strict: 20 };
 
   await app.register(cors, {
@@ -82,7 +104,12 @@ export async function buildGateway(opts: GatewayOptions) {
       http2: false,
       config: r.strict ? { rateLimit: { max: limits.strict, timeWindow: "1 minute" } } : {},
       replyOptions: {
-        rewriteRequestHeaders: (req, headers) => ({ ...headers, "x-request-id": req.id, "x-forwarded-for": req.ip }),
+        rewriteRequestHeaders: (req, headers) => {
+          const h: Record<string, unknown> = { ...headers, "x-request-id": req.id, "x-forwarded-for": req.ip };
+          delete h.traceparent;
+          delete h.tracestate;
+          return { ...h, ...traceHeaders(req.span) } as typeof headers;
+        },
         rewriteHeaders: (headers) => {
           const h = { ...headers };
           delete h["x-powered-by"];
@@ -92,22 +119,6 @@ export async function buildGateway(opts: GatewayOptions) {
       },
     });
   }
-
-  app.get("/readyz", async (_req, reply) => {
-    const checks = await Promise.all(
-      Object.entries(opts.upstreams).map(async ([name, url]) => {
-        try {
-          const r = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(2000) });
-          return [name, r.ok] as const;
-        } catch {
-          return [name, false] as const;
-        }
-      }),
-    );
-    const ok = checks.every(([, v]) => v);
-    reply.status(ok ? 200 : 503);
-    return { status: ok ? "ok" : "degraded", services: Object.fromEntries(checks) };
-  });
 
   return app;
 }

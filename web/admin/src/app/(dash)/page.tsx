@@ -29,7 +29,8 @@ export default function Overview() {
   return (
     <>
       <Header title="Overview" subtitle="Sandbox data: no real money is moving." />
-      {(stats.error || wallet.error) && <p className="error">{stats.error ?? wallet.error}</p>}
+      {[stats.error, wallet.error, orders.error].some((e) => e && !/role doesn't allow/.test(e)) && <p className="error">{stats.error ?? wallet.error ?? orders.error}</p>}
+      {[stats.error, wallet.error, orders.error].some((e) => e && /role doesn't allow/.test(e)) && <p className="muted">Some figures are hidden because your role doesn&apos;t include them.</p>}
       <div className="grid stats">
         {cards.map(([label, value, fmt], i) => (
           <motion.div key={label} className="card" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>

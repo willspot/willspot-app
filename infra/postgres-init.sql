@@ -6,3 +6,4 @@ CREATE DATABASE willspot_config;
 CREATE DATABASE willspot_giftcards;
 CREATE DATABASE willspot_bills;
 CREATE DATABASE willspot_risk;
+CREATE DATABASE willspot_notifications;

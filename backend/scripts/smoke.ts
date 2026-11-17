@@ -133,6 +133,47 @@ if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
   const th = await call("GET", "/v1/admin/trade/health", undefined, at);
   const bh = await call("GET", "/v1/admin/bills/health", undefined, at);
   check("ops: trade and bills health endpoints", th.status === 200 && bh.status === 200, { th: th.json, bh: bh.json });
+
+  // ---------- Phase 4: events → notifications, staff roles, observability ----------
+  check("gateway /readyz includes notifications", ready.json.services?.notifications === true, ready.json);
+  // Deposits above were committed with an outbox row; the relay publishes to NATS and the
+  // notifications service turns them into inbox entries.
+  const expected = ["wallet.deposit_received", "trade.order_completed", "wallet.withdrawal_completed", "bills.payment_completed", "giftcards.sell_approved"];
+  let inbox: Record<string, any> = {};
+  let types = new Set<string>();
+  for (let i = 0; i < 30; i++) {
+    inbox = (await call("GET", "/v1/notifications", undefined, token)).json;
+    types = new Set((inbox.items ?? []).map((n: { type: string }) => n.type));
+    if (expected.every((t) => types.has(t))) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  check("events: deposit, trade, withdrawal, bill and gift card reached the inbox via NATS", expected.every((t) => types.has(t)), [...types]);
+  check("events: unread count", inbox.unread >= 4, inbox.unread);
+  const dep = inbox.items?.find((n: { type: string }) => n.type === "wallet.deposit_received");
+  check("events: readable message", /arrived in your/.test(dep?.body ?? ""), dep);
+  check("push: device registered", (await call("POST", "/v1/notifications/devices", { token: `smoke-fcm-token-${randomUUID()}`, platform: "android" }, token)).status === 201);
+  check("inbox: mark all read", (await call("POST", "/v1/notifications/read", { all: true }, token)).json.updated >= 4);
+
+  // Staff with the support role: can look up users, can't move money or manage staff.
+  const staffEmail = `support+${randomUUID().slice(0, 6)}@willspot.test`;
+  const created = await call("POST", "/v1/admin/admins", { email: staffEmail, phone: `081${randomInt(10_000_000, 99_999_999)}`, firstName: "Sam", lastName: "Support", roles: ["support"] }, at);
+  check("roles: super admin creates a support staff account", created.status === 201 && !!created.json.setupToken, created.json);
+  check("roles: setup link sets the password", (await call("POST", "/v1/auth/admin-setup", { token: created.json.setupToken, password: "SupportPass123" })).status === 200);
+  const sup = (await call("POST", "/v1/auth/login", { email: staffEmail, password: "SupportPass123" })).json.accessToken as string;
+  check("roles: support can read users", (await call("GET", "/v1/admin/users", undefined, sup)).status === 200);
+  check("roles: support cannot change rates", (await call("POST", "/v1/admin/trade/fx", { usdNgn: "1600.00" }, sup)).json.error?.code === "permission_denied");
+  check("roles: support cannot manage staff", (await call("GET", "/v1/admin/admins", undefined, sup)).status === 403);
+  check("roles: support cannot see ops", (await call("GET", "/v1/admin/notifications/health", undefined, sup)).status === 403);
+  const nh = await call("GET", "/v1/admin/notifications/health", undefined, at);
+  check("ops: notifications health", nh.status === 200 && nh.json.notifications24h >= 4, nh.json);
+
+  const res = await fetch(`${API}/v1/me`, { headers: { authorization: `Bearer ${token}` } });
+  check("tracing: every response has a request id", /^[\w-]{8,64}$/.test(res.headers.get("x-request-id") ?? ""));
+  if (process.env.METRICS_URL) {
+    const m = await (await fetch(process.env.METRICS_URL)).text();
+    check("metrics: request histogram exported", /http_server_request_duration_seconds_bucket\{[^}]*service="gateway"/.test(m), m.slice(0, 200));
+  }
+  check("edge: /metrics is not routed publicly", (await call("GET", "/metrics")).status === 404);
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll smoke checks passed");

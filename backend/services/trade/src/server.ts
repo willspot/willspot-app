@@ -1,8 +1,9 @@
-import { FlagsClient, OpsNotifier, RiskClient, callInternal, createPool, every, loadVerifier } from "@willspot/common";
-import { buildTrade, pendingHealth, type LedgerClient } from "./app.js";
+import { FlagsClient, OpsNotifier, RiskClient, callInternal, createPool, every, loadVerifier, busFromEnv, loadSecretFiles, migrateOnlyAndExit, serve, startOutboxRelay } from "@willspot/common";
+import { buildTrade, pendingHealth, type LedgerClient, MIGRATIONS } from "./app.js";
 import { SandboxMarketProvider } from "./market.js";
 import { startRetrier } from "./settlement.js";
 
+loadSecretFiles();
 const env = (k: string, d?: string) => {
   const v = process.env[k] ?? d;
   if (v === undefined) throw new Error(`Missing env ${k}`);
@@ -19,6 +20,7 @@ const identity = { baseUrl: env("IDENTITY_INTERNAL_URL", "http://localhost:4001"
 const config = process.env.CONFIG_INTERNAL_URL ? { baseUrl: process.env.CONFIG_INTERNAL_URL, service: "trade", token } : null;
 
 const db = createPool(env("TRADE_DATABASE_URL"));
+await migrateOnlyAndExit(db, MIGRATIONS, "trade");
 const ledger: LedgerClient = { post: (body) => callInternal(wallet, "POST", "/internal/ledger/journals", body) };
 const app = await buildTrade({
   db,
@@ -36,6 +38,17 @@ const ops = new OpsNotifier("trade", process.env.OPS_ALERT_WEBHOOK_URL || undefi
 every(5 * 60_000, async () => {
   const h = await pendingHealth(db);
   if (h.pendingSettlements && h.oldestPendingMinutes >= 15) await ops.alert("pending-settlements", `${h.pendingSettlements} trade(s) waiting to settle; oldest ${h.oldestPendingMinutes} min`);
-}, (e) => app.log.error({ err: e }, "ops check failed"));
+}, (e) => app.log.error({ err: e }, "ops check failed"), { db, key: "trade-ops-check" });
 
-await app.listen({ host: env("HOST", "0.0.0.0"), port: Number(env("PORT", "4003")) });
+// Publish committed outbox events (ADR-021). Without NATS_URL they wait in the outbox.
+const bus = await busFromEnv("trade", (m, e) => app.log.warn({ err: e }, m));
+const stopRelay = bus ? startOutboxRelay(db, bus, "trade", (e) => app.log.error({ err: e }, "outbox relay failed")) : undefined;
+
+await serve(app, {
+  port: Number(env("PORT", "4003")),
+  onShutdown: async () => {
+    stopRelay?.();
+    await bus?.close();
+    await db.end();
+  },
+});

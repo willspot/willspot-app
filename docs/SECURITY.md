@@ -26,6 +26,11 @@ Mapped to OWASP ASVS 4.0 (backend/web) and MASVS 2 (mobile) categories. Category
 | Uploads | Gift-card photos accepted only when the bytes are JPEG/PNG (magic numbers), ≤1.5 MB; SVG and other types refused | Tested |
 | Step-up scopes | `withdraw`, `trade`, `pay`, `delete_account` — a token for one cannot authorise another | Tested |
 | Rate limits (multi-replica) | Shared Redis store when `REDIS_URL` is set (fails open if Redis is down) | **Not run locally** (no Redis here) |
+| Admin roles (least privilege) | Five roles mapped to per-route permissions; roles in the token; only super admins manage staff; no self-changes; last super admin protected; role change ends sessions; one-time hashed setup links in the URL fragment | Tested (unit, service, smoke, browser) |
+| Customer 2FA | Optional TOTP with 10 hashed single-use recovery codes; support reset needs a reason, is audited and ends sessions; new-device and security-change alerts that can't be muted | Tested (service + Flutter + emulator) |
+| Least-privilege runtime | Per-service Secret, row-only DB role for pods, schema owner only in the migration Job, read-only backup role; NetworkPolicy default-deny with per-caller allow-lists; no service-account tokens; seccomp RuntimeDefault | Chart validated, **not run on a cluster** |
+| Backups | age-encrypted (job holds public key only), SHA-256 manifest, restore drill checks ledger invariants; refuses unencrypted output | Tested locally (incl. tamper detection) |
+| Observability without leaks | Auth/cookie/step-up/service-token headers redacted in logs; collector drops auth headers; edge ignores client trace headers; metrics port never routed publicly | Tested (smoke: `/metrics` 404 at the edge) |
 | Admin web | Tokens only in httpOnly SameSite=Strict cookies; CSRF header on mutations; proxy allow-list; CSP, frame-ancestors none, no-referrer, noindex | Manually verified with curl |
 
 ## Mobile (MASVS)
@@ -43,8 +48,9 @@ Mapped to OWASP ASVS 4.0 (backend/web) and MASVS 2 (mobile) categories. Category
 ## Before launch (must-do)
 1. Pin GitHub Actions to commit SHAs and Docker base images to digests.
 2. ~~Pinning and device signals~~ built; enable pinning with your real certs; add Play Integrity / App Attest.
-3. ~~Admin 2FA~~ done (phase 2); per-admin roles still to do.
+3. ~~Admin 2FA~~ done (phase 2); ~~per-admin roles~~ done (phase 4).
 4. ~~Shared rate-limit store~~ wired (verify in staging); WAF in front of the gateway.
-5. Secrets from a secret manager; rotate the dev keys.
+5. ~~Secrets from a secret manager~~ wired (External Secrets or `*_FILE`); create real per-service DB roles; rotate the dev keys.
+8. Run the restore drill on production-sized data and record the RTO; run a 3-node NATS JetStream cluster.
 6. External penetration test; NDPA data-protection impact assessment.
 7. Re-check every point above against ASVS L2 / MASVS-L2 line by line.

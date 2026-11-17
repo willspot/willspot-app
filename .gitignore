@@ -26,3 +26,6 @@ backend/services/*/src/**/*.js
 backend/**/*.d.ts
 backend/**/*.js.map
 *.tsbuildinfo
+
+# local NATS JetStream data (scripts/dev.ts)
+backend/.nats-data/

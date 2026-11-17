@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'brand.dart';
+import 'push.dart';
 
 /// App-wide state: branding, feature flags, the signed-in user and the API client.
 class AppState extends ChangeNotifier {
@@ -26,6 +27,21 @@ class AppState extends ChangeNotifier {
   bool get signedIn => user != null;
   int get kycTier => (user?['kycTier'] as num?)?.toInt() ?? 0;
   bool get hasPin => user?['hasPin'] == true;
+  bool get totpEnabled => user?['totpEnabled'] == true;
+
+  /// Unread in-app notifications (badge on the bell).
+  int unread = 0;
+
+  Future<void> refreshUnread() async {
+    try {
+      final r = await api.get('/v1/notifications?limit=1');
+      final n = (r['unread'] as num?)?.toInt() ?? 0;
+      if (n != unread) {
+        unread = n;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
 
   /// Bundled brand first (instant), then the admin-controlled server copy.
   Future<void> loadConfig({AssetBundle? bundle}) async {
@@ -68,6 +84,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    await Push.stop(this);
     try {
       await api.post('/v1/auth/logout');
     } catch (_) {}
@@ -78,6 +95,7 @@ class AppState extends ChangeNotifier {
   Future<void> forgetSession() async {
     await api.clearSession();
     user = null;
+    unread = 0;
     notifyListeners();
   }
 

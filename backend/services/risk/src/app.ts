@@ -8,10 +8,10 @@ import {
   createApp,
   currentUser,
   fromMinor,
-  migrate,
+  migrateOnStart,
   notFound,
   parse,
-  requireAdmin,
+  requirePermission, type Permission,
   requireService,
   toMinor,
   tx,
@@ -54,10 +54,10 @@ export function toCsv(rows: Record<string, unknown>[]): string {
 
 export async function buildRisk(deps: RiskDeps) {
   const { db } = deps;
-  await migrate(db, MIGRATIONS);
-  const app = await createApp("risk", { logger: deps.logger });
+  await migrateOnStart(db, MIGRATIONS);
+  const app = await createApp("risk", { logger: deps.logger, ready: () => db.query("SELECT 1") });
   const auth = authenticate(deps.verifier);
-  const admin = { preHandler: [auth, requireAdmin] };
+  const perm = (p: Permission) => ({ preHandler: [auth, requirePermission(p)] });
   const audit = (actor: string | null, action: string, target: string, meta: object = {}) =>
     db.query("INSERT INTO audit_log(actor_id, action, target, meta) VALUES ($1,$2,$3,$4)", [actor, action, target, meta]);
   const loadRules = async () =>
@@ -109,7 +109,7 @@ export async function buildRisk(deps: RiskDeps) {
 
   // ---------- Alerts ----------
 
-  app.get("/v1/admin/risk/alerts", admin, async (req) => {
+  app.get("/v1/admin/risk/alerts", perm("risk.manage"), async (req) => {
     const q = parse(z.object({ status: z.enum(["open", "dismissed", "escalated"]).default("open"), userId: uuidSchema.optional() }), req.query);
     const r = await db.query(
       `SELECT a.*, e.kind, e.amount_ngn, e.device, r.description FROM alerts a
@@ -120,7 +120,7 @@ export async function buildRisk(deps: RiskDeps) {
     return { items: r.rows.map((a) => ({ ...a, amount_ngn: a.amount_ngn ? fromMinor(BigInt(a.amount_ngn), "NGN") : null })) };
   });
 
-  app.post("/v1/admin/risk/alerts/:id", admin, async (req) => {
+  app.post("/v1/admin/risk/alerts/:id", perm("risk.manage"), async (req) => {
     const { id } = parse(z.object({ id: uuidSchema }), req.params);
     const b = parse(z.object({ action: z.enum(["dismiss", "escalate"]), caseId: uuidSchema.optional(), note: z.string().max(1000).optional() }), req.body);
     const actor = currentUser(req).id;
@@ -138,7 +138,7 @@ export async function buildRisk(deps: RiskDeps) {
 
   // ---------- Cases ----------
 
-  app.get("/v1/admin/risk/cases", admin, async () => {
+  app.get("/v1/admin/risk/cases", perm("risk.manage"), async () => {
     const r = await db.query(
       `SELECT c.*, (SELECT count(*) FROM alerts a WHERE a.case_id=c.id) AS alert_count, EXISTS(SELECT 1 FROM holds h WHERE h.user_id=c.user_id) AS on_hold
        FROM cases c ORDER BY c.updated_at DESC LIMIT 200`,
@@ -146,7 +146,7 @@ export async function buildRisk(deps: RiskDeps) {
     return { items: r.rows.map((c) => ({ ...c, alert_count: Number(c.alert_count) })) };
   });
 
-  app.get("/v1/admin/risk/cases/:id", admin, async (req) => {
+  app.get("/v1/admin/risk/cases/:id", perm("risk.manage"), async (req) => {
     const { id } = parse(z.object({ id: uuidSchema }), req.params);
     const c = (await db.query("SELECT * FROM cases WHERE id=$1", [id])).rows[0];
     if (!c) throw notFound();
@@ -165,7 +165,7 @@ export async function buildRisk(deps: RiskDeps) {
     };
   });
 
-  app.post("/v1/admin/risk/cases/:id", admin, async (req) => {
+  app.post("/v1/admin/risk/cases/:id", perm("risk.manage"), async (req) => {
     const { id } = parse(z.object({ id: uuidSchema }), req.params);
     const b = parse(
       z.object({ status: z.enum(["open", "investigating", "reported", "closed"]).optional(), note: z.string().min(1).max(4000).optional(), strReference: z.string().max(100).optional() }),
@@ -182,9 +182,9 @@ export async function buildRisk(deps: RiskDeps) {
 
   // ---------- Holds ----------
 
-  app.get("/v1/admin/risk/holds", admin, async () => ({ items: (await db.query("SELECT * FROM holds ORDER BY created_at DESC")).rows }));
+  app.get("/v1/admin/risk/holds", perm("risk.manage"), async () => ({ items: (await db.query("SELECT * FROM holds ORDER BY created_at DESC")).rows }));
 
-  app.post("/v1/admin/risk/holds", admin, async (req) => {
+  app.post("/v1/admin/risk/holds", perm("risk.manage"), async (req) => {
     const b = parse(z.object({ userId: uuidSchema, reason: z.string().min(3).max(300), caseId: uuidSchema.optional() }), req.body);
     const actor = currentUser(req).id;
     await db.query("INSERT INTO holds(user_id, reason, placed_by, case_id) VALUES ($1,$2,$3,$4) ON CONFLICT (user_id) DO UPDATE SET reason=EXCLUDED.reason", [b.userId, b.reason, actor, b.caseId ?? null]);
@@ -192,7 +192,7 @@ export async function buildRisk(deps: RiskDeps) {
     return { ok: true };
   });
 
-  app.post("/v1/admin/risk/holds/:userId/release", admin, async (req) => {
+  app.post("/v1/admin/risk/holds/:userId/release", perm("risk.manage"), async (req) => {
     const { userId } = parse(z.object({ userId: uuidSchema }), req.params);
     const { reason } = parse(z.object({ reason: z.string().min(3).max(300) }), req.body);
     const r = await db.query("DELETE FROM holds WHERE user_id=$1", [userId]);
@@ -203,9 +203,9 @@ export async function buildRisk(deps: RiskDeps) {
 
   // ---------- Rules ----------
 
-  app.get("/v1/admin/risk/rules", admin, async () => ({ items: (await db.query("SELECT * FROM rules ORDER BY id")).rows }));
+  app.get("/v1/admin/risk/rules", perm("risk.manage"), async () => ({ items: (await db.query("SELECT * FROM rules ORDER BY id")).rows }));
 
-  app.post("/v1/admin/risk/rules/:id", admin, async (req) => {
+  app.post("/v1/admin/risk/rules/:id", perm("risk.manage"), async (req) => {
     const { id } = parse(z.object({ id: z.string().max(40) }), req.params);
     const b = parse(z.object({ enabled: z.boolean(), action: z.enum(["review", "block", "hold"]), params: z.record(z.string(), z.number().nonnegative()) }), req.body);
     const cur = (await db.query<{ params: Record<string, number> }>("SELECT params FROM rules WHERE id=$1", [id])).rows[0];
@@ -221,7 +221,7 @@ export async function buildRisk(deps: RiskDeps) {
   // Field sets are drafts. NFIU's required format (goAML schema, thresholds and
   // deadlines) is UNVERIFIED and must be confirmed with counsel before filing.
 
-  app.get("/v1/admin/risk/reports/str/:caseId", admin, async (req, reply) => {
+  app.get("/v1/admin/risk/reports/str/:caseId", perm("risk.reports"), async (req, reply) => {
     const { caseId } = parse(z.object({ caseId: uuidSchema }), req.params);
     const { format } = parse(z.object({ format: z.enum(["json", "csv"]).default("json") }), req.query);
     const c = (await db.query("SELECT * FROM cases WHERE id=$1", [caseId])).rows[0];
@@ -247,7 +247,7 @@ export async function buildRisk(deps: RiskDeps) {
     };
   });
 
-  app.get("/v1/admin/risk/reports/ctr", admin, async (req, reply) => {
+  app.get("/v1/admin/risk/reports/ctr", perm("risk.reports"), async (req, reply) => {
     const q = parse(z.object({ from: z.iso.date(), to: z.iso.date() }), req.query);
     const t = (await db.query<{ params: { individualNgn: number } }>("SELECT params FROM rules WHERE id='ctr_threshold'")).rows[0]!;
     const threshold = BigInt(Math.round(t.params.individualNgn * 100));
@@ -262,7 +262,7 @@ export async function buildRisk(deps: RiskDeps) {
     return toCsv(rows) || "date,user_id,type,direction,amount_ngn\n";
   });
 
-  app.get("/v1/admin/risk/summary", admin, async () => {
+  app.get("/v1/admin/risk/summary", perm("risk.manage"), async () => {
     const r = await db.query<{ open_alerts: string; high: string; holds: string; open_cases: string; blocked_24h: string }>(
       `SELECT (SELECT count(*) FROM alerts WHERE status='open') AS open_alerts,
               (SELECT count(*) FROM alerts WHERE status='open' AND severity='high') AS high,

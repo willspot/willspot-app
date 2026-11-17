@@ -21,7 +21,11 @@ x-service: &service
     GIFTCARDS_INTERNAL_URL: http://giftcards:4005
     BILLS_INTERNAL_URL: http://bills:4006
     RISK_INTERNAL_URL: http://risk:4007
+    NOTIFICATIONS_INTERNAL_URL: http://notifications:4008
     REDIS_URL: redis://redis:6379
+    NATS_URL: nats://nats:4222
+    # Traces go to the collector in the "observability" profile; harmless if it's not running.
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     IDENTITY_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_identity
     WALLET_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_wallet
     TRADE_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_trade
@@ -29,9 +33,12 @@ x-service: &service
     GIFTCARDS_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_giftcards
     BILLS_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_bills
     RISK_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_risk
+    NOTIFICATIONS_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_notifications
   depends_on:
     postgres:
       condition: service_healthy
+    nats:
+      condition: service_started
   read_only: true
   security_opt: ["no-new-privileges:true"]
   cap_drop: ["ALL"]
@@ -52,6 +59,14 @@ services:
       test: ["CMD-SHELL", "pg_isready -U willspot"]
       interval: 5s
       retries: 10
+    networks: [internal]
+
+  nats:
+    image: nats:2.15-alpine
+    # JetStream on, data in a volume. Clients connect on 4222; monitoring on 8222 stays internal.
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    volumes:
+      - natsdata:/data
     networks: [internal]
 
   redis:
@@ -94,20 +109,85 @@ services:
     build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: trade } }
     environment: { <<: *common-env, PORT: "4003" }
 
+  notifications:
+    <<: *service
+    build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: notifications } }
+    environment: { <<: *common-env, PORT: "4008" }
+
   gateway:
     <<: *service
     build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: gateway } }
     environment: { <<: *common-env, PORT: "8080" }
-    depends_on: [identity, wallet, trade, config, giftcards, bills, risk, redis]
+    depends_on: [identity, wallet, trade, config, giftcards, bills, risk, notifications, redis]
     ports: ["8080:8080"]
+    networks: [internal, edge]
+
+  # ---- Observability (optional): docker compose --profile observability up ----
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.139.0
+    profiles: [observability]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    configs:
+      - source: otel_config
+        target: /etc/otelcol/config.yaml
+    networks: [internal]
+
+  tempo:
+    image: grafana/tempo:2.9.0
+    profiles: [observability]
+    command: ["-config.file=/etc/tempo.yaml"]
+    configs:
+      - source: tempo_config
+        target: /etc/tempo.yaml
+    networks: [internal]
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    profiles: [observability]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--web.enable-lifecycle"]
+    configs:
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+      - source: prometheus_rules
+        target: /etc/prometheus/rules/willspot.rules.yml
+    networks: [internal]
+
+  grafana:
+    image: grafana/grafana:12.2.1
+    profiles: [observability]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    configs:
+      - source: grafana_datasources
+        target: /etc/grafana/provisioning/datasources/willspot.yaml
+      - source: grafana_dashboards
+        target: /etc/grafana/provisioning/dashboards/willspot.yaml
+      - source: grafana_dashboard_overview
+        target: /var/lib/grafana/dashboards/willspot-overview.json
+    ports: ["127.0.0.1:3300:3000"]
     networks: [internal, edge]
 
 configs:
   pg_init:
     file: ./postgres-init.sql
+  otel_config:
+    file: ./observability/otel-collector.yaml
+  tempo_config:
+    file: ./observability/tempo.yaml
+  prometheus_config:
+    file: ./observability/prometheus.yml
+  prometheus_rules:
+    file: ./observability/alerts/willspot.rules.yml
+  grafana_datasources:
+    file: ./observability/grafana/datasources.yaml
+  grafana_dashboards:
+    file: ./observability/grafana/dashboards.yaml
+  grafana_dashboard_overview:
+    file: ./observability/grafana/willspot-overview.json
 
 volumes:
   pgdata:
+  natsdata:
 
 networks:
   internal:

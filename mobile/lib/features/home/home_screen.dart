@@ -13,6 +13,8 @@ import '../giftcards/giftcards_screen.dart';
 import '../receipt/receipt_screen.dart';
 import '../wallet/usd_account_screen.dart';
 import '../kyc/kyc_screen.dart';
+import '../notifications/inbox_screen.dart';
+import '../security/two_factor_screen.dart';
 import '../trade/trade_screen.dart';
 import '../wallet/deposit_screen.dart';
 import '../wallet/withdraw_screen.dart';
@@ -38,7 +40,9 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> reload() async {
-    final api = AppScope.read(context).api;
+    final app = AppScope.read(context);
+    final api = app.api;
+    app.refreshUnread(); // keep the bell current whenever home refreshes
     try {
       final r = await Future.wait([api.get('/v1/wallet/balances'), api.get('/v1/wallet/transactions?limit=5')]);
       if (!mounted) return;
@@ -55,6 +59,22 @@ class HomeScreenState extends State<HomeScreen> {
           _error = e;
         });
       }
+    }
+  }
+
+  /// Where a tapped notification leads.
+  void _openFromNotification(String screen) {
+    switch (screen) {
+      case 'transactions':
+        widget.onOpenTab(2);
+      case 'security':
+        _open(const TwoFactorScreen());
+      case 'verification':
+        _open(const KycScreen());
+      case 'giftcards':
+        _open(const GiftCardsScreen());
+      case 'bills':
+        _open(const BillsScreen());
     }
   }
 
@@ -90,7 +110,22 @@ class HomeScreenState extends State<HomeScreen> {
           FadeSlideIn(
             child: Row(children: [
               Expanded(child: Text('Hi $name 👋', style: Theme.of(context).textTheme.headlineSmall)),
-              IconButton(onPressed: () => widget.onOpenTab(3), icon: const Icon(Icons.notifications_none_rounded), tooltip: 'Notifications'),
+              IconButton(
+                onPressed: () async {
+                  final app = AppScope.read(context);
+                  await Navigator.push(context, fadeRoute(InboxScreen(onOpenScreen: _openFromNotification)));
+                  app.refreshUnread();
+                },
+                tooltip: state.unread > 0 ? 'Notifications, ${state.unread} unread' : 'Notifications',
+                // The tooltip is the accessible name; keep the badge digit out of it.
+                icon: ExcludeSemantics(
+                  child: Badge(
+                    isLabelVisible: state.unread > 0,
+                    label: Text(state.unread > 9 ? '9+' : '${state.unread}'),
+                    child: Icon(state.unread > 0 ? Icons.notifications_active_rounded : Icons.notifications_none_rounded),
+                  ),
+                ),
+              ),
             ]),
           ),
           if (!state.hasPin || state.kycTier < 1) ...[

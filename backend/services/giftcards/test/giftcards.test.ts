@@ -65,7 +65,7 @@ async function user(tier = 1) {
   const id = randomUUID();
   return { id, token: await issuer.signAccess({ id, role: "user", tier, sid: "s" }) };
 }
-const adminToken = () => issuer.signAccess({ id: randomUUID(), role: "admin", tier: 2, sid: "s" });
+const adminToken = () => issuer.signAccess({ id: randomUUID(), role: "admin", roles: ["super_admin"], tier: 2, sid: "s" });
 const ngn = async (t: string) => (await call(wallet, "GET", "/v1/wallet/balances", t)).json().balances.find((b: { asset: string }) => b.asset === "NGN").balance;
 const sell = (t: string, body: object) => call(gc, "POST", "/v1/giftcards/sell", t, { idempotencyKey: randomUUID(), ...body });
 
@@ -150,5 +150,12 @@ describe("gift cards", () => {
     const poor = await user();
     const fail = await call(gc, "POST", "/v1/giftcards/buy", poor.token, { ...body, idempotencyKey: "buy-000002" }, { "x-step-up": await issuer.signStepUp(poor.id, "trade") });
     expect(fail.json().error.code).toBe("insufficient_funds");
+  });
+
+  it("writes an outbox event for each completed money movement (ADR-021)", async () => {
+    const types = new Set<string>();
+    for (const d of dbs) for (const r of (await d.db.query<{ type: string }>("SELECT type FROM outbox")).rows) types.add(r.type);
+    expect([...types]).toEqual(expect.arrayContaining(["giftcards.sell_approved", "giftcards.buy_completed"]));
+    console.log("outbox types:", [...types].sort().join(", "));
   });
 });

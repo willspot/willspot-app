@@ -1,4 +1,4 @@
-import { AppError, fromMinor, type Asset, type Db } from "@willspot/common";
+import { AppError, fromMinor, type Asset, type Db, every } from "@willspot/common";
 import type { LedgerClient } from "./app.js";
 
 export type SettleOutcome = { status: "completed"; journalId: string } | { status: "failed"; failure: string } | { status: "pending_settlement" };
@@ -99,8 +99,7 @@ async function record(db: Db, table: "orders" | "conversions", id: string, r: Se
   return 1;
 }
 
-export function startRetrier(db: Db, ledger: LedgerClient, everyMs = 15_000) {
-  const t = setInterval(() => void retryPending(db, ledger).catch(() => {}), everyMs);
-  t.unref();
-  return () => clearInterval(t);
+/** Every 15 s on one replica at a time (rows are also locked, so overlap would be safe, just wasteful). */
+export function startRetrier(db: Db, ledger: LedgerClient, everyMs = 15_000, onError: (e: unknown) => void = () => {}) {
+  return every(everyMs, () => retryPending(db, ledger), onError, { db, key: "trade-settlement-retry" });
 }

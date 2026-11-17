@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { fromMinor, requireAdmin, type Asset, type Db, type OpsNotifier } from "@willspot/common";
+import { fromMinor, requirePermission, type Permission, type Asset, type Db, type OpsNotifier } from "@willspot/common";
 import type { BankProvider } from "./providers.js";
 
 export interface Reconciliation {
@@ -58,9 +58,9 @@ export async function runOpsChecks(db: Db, ops: OpsNotifier) {
 }
 
 export function registerOpsRoutes(app: FastifyInstance, db: Db, auth: (req: never) => Promise<void>) {
-  const admin = { preHandler: [auth as never, requireAdmin] };
-  app.get("/v1/admin/wallet/reconcile", admin, async () => reconcile(db));
-  app.get("/v1/admin/wallet/webhook-failures", admin, async () => ({ items: (await db.query("SELECT * FROM webhook_failures ORDER BY at DESC LIMIT 100")).rows }));
+  const perm = (p: Permission) => ({ preHandler: [auth as never, requirePermission(p)] });
+  app.get("/v1/admin/wallet/reconcile", perm("ops.read"), async () => reconcile(db));
+  app.get("/v1/admin/wallet/webhook-failures", perm("ops.read"), async () => ({ items: (await db.query("SELECT * FROM webhook_failures ORDER BY at DESC LIMIT 100")).rows }));
 }
 
 /** Records failed webhook calls (signature errors, upstream errors) for the ops page. */

@@ -7,6 +7,8 @@ import '../../ui/widgets.dart';
 import '../auth/set_pin_screen.dart';
 import '../common/pin_sheet.dart';
 import '../kyc/kyc_screen.dart';
+import '../notifications/notification_settings_screen.dart';
+import '../security/two_factor_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -67,6 +69,8 @@ class ProfileScreen extends StatelessWidget {
           child: Column(children: [
             tile(Icons.verified_user_outlined, 'Verification', subtitle: 'Tier ${state.kycTier} of 2', onTap: () => Navigator.push(context, fadeRoute(const KycScreen()))),
             tile(Icons.pin_outlined, state.hasPin ? 'Change PIN' : 'Set transaction PIN', onTap: () => Navigator.push(context, fadeRoute(const SetPinScreen()))),
+            tile(Icons.phonelink_lock_outlined, 'Two-factor sign-in', subtitle: state.totpEnabled ? 'On' : 'Off — recommended', onTap: () => Navigator.push(context, fadeRoute(const TwoFactorScreen()))),
+            tile(Icons.notifications_outlined, 'Notifications', onTap: () => Navigator.push(context, fadeRoute(const NotificationSettingsScreen()))),
             tile(Icons.phone_outlined, 'Phone', subtitle: u['phone'] as String?),
           ]),
         ),

@@ -1,0 +1,29 @@
+{{- if .Values.monitoring.serviceMonitor }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "willspot.fullname" . }}
+  labels:
+    {{- include "willspot.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.labels }}{{ toYaml . | nindent 4 }}{{ end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: willspot
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: metrics
+      interval: 30s
+{{- end }}
+{{- if .Values.monitoring.prometheusRule }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "willspot.fullname" . }}
+  labels:
+    {{- include "willspot.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.labels }}{{ toYaml . | nindent 4 }}{{ end }}
+spec:
+{{ .Files.Get "files/willspot.rules.yml" | indent 2 }}
+{{- end }}

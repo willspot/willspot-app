@@ -1,7 +1,8 @@
-import { FlagsClient, RiskClient, callInternal, createPool, loadVerifier } from "@willspot/common";
-import { buildBills, requeryPending, type LedgerClient } from "./app.js";
+import { FlagsClient, RiskClient, callInternal, createPool, loadVerifier, busFromEnv, every, loadSecretFiles, migrateOnlyAndExit, serve, startOutboxRelay } from "@willspot/common";
+import { buildBills, requeryPending, type LedgerClient, MIGRATIONS } from "./app.js";
 import { SandboxBillProvider, VtpassBillProvider, type BillProvider } from "./billers.js";
 
+loadSecretFiles();
 const env = (k: string, d?: string) => {
   const v = process.env[k] ?? d;
   if (v === undefined) throw new Error(`Missing env ${k}`);
@@ -22,6 +23,7 @@ const identity = { baseUrl: env("IDENTITY_INTERNAL_URL", "http://localhost:4001"
 const config = process.env.CONFIG_INTERNAL_URL ? { baseUrl: process.env.CONFIG_INTERNAL_URL, service: "bills", token } : null;
 
 const db = createPool(env("BILLS_DATABASE_URL"));
+await migrateOnlyAndExit(db, MIGRATIONS, "bills");
 const ledger = { post: (body: Parameters<LedgerClient["post"]>[0]) => callInternal<{ journalId: string; duplicate: boolean }>(wallet, "POST", "/internal/ledger/journals", body) };
 const app = await buildBills({
   db,
@@ -34,6 +36,17 @@ const app = await buildBills({
 });
 
 // Requery biller payments left processing (timeouts / pending) every minute.
-setInterval(() => void requeryPending(db, provider, ledger).catch((e) => app.log.error({ err: e }, "bill requery failed")), 60_000).unref();
+every(60_000, () => requeryPending(db, provider, ledger), (e) => app.log.error({ err: e }, "bill requery failed"), { db, key: "bills-requery" });
 
-await app.listen({ host: env("HOST", "0.0.0.0"), port: Number(env("PORT", "4006")) });
+// Publish committed outbox events (ADR-021). Without NATS_URL they wait in the outbox.
+const bus = await busFromEnv("bills", (m, e) => app.log.warn({ err: e }, m));
+const stopRelay = bus ? startOutboxRelay(db, bus, "bills", (e) => app.log.error({ err: e }, "outbox relay failed")) : undefined;
+
+await serve(app, {
+  port: Number(env("PORT", "4006")),
+  onShutdown: async () => {
+    stopRelay?.();
+    await bus?.close();
+    await db.end();
+  },
+});

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_state.dart';
+import '../../core/push.dart';
 import '../../ui/motion.dart';
 import '../history/history_screen.dart';
 import '../onboarding/onboarding_screen.dart';
@@ -19,6 +20,18 @@ class _HomeShellState extends State<HomeShell> {
   final _homeKey = GlobalKey<HomeScreenState>();
 
   void go(int tab) => setState(() => _tab = tab);
+
+  @override
+  void initState() {
+    super.initState();
+    // After sign-in: unread badge now, push registration if this build has Firebase set up.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final state = AppScope.read(context);
+      state.refreshUnread();
+      Push.start(state);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -1,0 +1,30 @@
+# OpenTelemetry Collector: services send OTLP/HTTP here; spans go on to Tempo.
+# Swap the exporter for your vendor (Grafana Cloud, Honeycomb, Datadog…) without touching the services.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 400
+  batch: {}
+  # Belt and braces: drop anything that looks like a credential before it leaves the cluster.
+  attributes/scrub:
+    actions:
+      - key: http.request.header.authorization
+        action: delete
+      - key: http.request.header.cookie
+        action: delete
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub, batch]
+      exporters: [otlp/tempo]

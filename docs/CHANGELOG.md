@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0 — 2026-11-17 — Phase 4: production readiness + 2b leftovers
+- **Event bus** (ADR-021): transactional outbox (Postgres triggers) in identity, wallet, trade, gift cards and bills. The relay publishes to NATS JetStream; delivery is at-least-once with deduplication.
+- **Notifications service** (ADR-022, port 4008): in-app inbox, read state and preferences, device registration, and push through FCM HTTP v1. Admin push health appears on the Operations page.
+- **Admin roles** (ADR-023): super admin, compliance, finance, support and operations. Every admin route is mapped to a permission. The new Staff & roles page creates staff with one-time setup links, and the dashboard navigation follows the role.
+- **Customer 2FA** (ADR-024): authenticator setup in the app (QR code), single-use recovery codes, support-assisted reset with a reason, and new-device sign-in alerts. Each install now sends a stable random id.
+- **Observability** (ADR-026):
+  - OpenTelemetry traces across services and Prometheus metrics on port 9464;
+  - `trace_id` in logs and readiness checks backed by the database;
+  - alert rules, a Grafana dashboard, and a compose `observability` profile.
+- **Deployment** (ADR-025):
+  - provider-neutral Helm chart and admin Dockerfile;
+  - `infra` CI (lint, kubeconform, compose and promtool checks, shellcheck) and a gated `deploy` workflow; release tags for notifications, admin and backup;
+  - graceful shutdown, migrations as Jobs (`MIGRATE_ONLY` / `MIGRATE_ON_START`), `*_FILE` secrets, and single-replica background jobs.
+- **Backups** (ADR-027): age-encrypted `pg_dump` per database with a manifest, and a restore drill that checks ledger invariants. See the runbook in docs/DEPLOYMENT.md.
+- **Fix:** the wallet ledger ran parallel queries on one transaction client (pg deprecation; this breaks in pg 9).
+- Tests: backend 114 → 144, Flutter 24 → 27, smoke 34 → 50.
+
 ## 0.3.0 — 2026-11-17 — Phase 3: real-provider adapters, AML, ops, app hardening
 - **Provider research** with sources (docs/PROVIDERS.md). Adapters are written only against vendor docs and are all **off until keys are added**:
   - Paystack (virtual accounts, bank list, name enquiry, payouts; checked against Paystack's own OpenAPI spec);

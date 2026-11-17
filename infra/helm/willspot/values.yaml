@@ -1,0 +1,173 @@
+# WillSpot Helm values. Provider-neutral: runs on any conformant Kubernetes (>= 1.27).
+# Personal data must stay in Nigeria (ADR-008): pick a cluster, database and object store
+# hosted in-country, and keep backups and traces there too.
+
+image:
+  registry: ghcr.io/your-org        # images are <registry>/willspot-<service>:<tag>
+  tag: "0.4.0"                      # override per service with services.<name>.image.tag
+  # Prefer digests in production: services.<name>.image.digest: sha256:...
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Non-secret settings shared by every service (rendered into a ConfigMap).
+config:
+  NODE_ENV: production
+  DEPLOY_ENV: production
+  LOG_LEVEL: info
+  ADMIN_REQUIRE_MFA: "1"
+  MIGRATE_ON_START: "0"             # migrations run in a Job with the schema-owner role
+  SHUTDOWN_DRAIN_MS: "5000"
+  METRICS_PORT: "9464"
+  OTP_MODE: termii
+  KYC_PROVIDER: dojah
+  BANK_PROVIDER: paystack
+  BILL_PROVIDER: vtpass
+  PUSH_PROVIDER: fcm
+  CORS_ORIGINS: https://www.example.ng,https://admin.example.ng
+  RATE_LIMIT_GENERAL: "300"
+  RATE_LIMIT_STRICT: "20"
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""   # e.g. http://otel-collector.observability:4318
+  NATS_URL: nats://nats.nats:4222   # install NATS separately (official nats Helm chart, JetStream on)
+  REDIS_URL: ""                     # required when gateway.replicas > 1 (shared rate limits)
+
+# Secrets. Each service reads ONLY its own Secret "<release>-<service>" (least privilege).
+# Keys each one needs are listed in docs/DEPLOYMENT.md. Either create them yourself, or
+# let External Secrets Operator pull them from your secret manager (Vault, a cloud KMS-backed
+# store, etc.) — one remote JSON secret per service at <remotePrefix>/<service>.
+externalSecrets:
+  enabled: false
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: willspot
+  remotePrefix: willspot/production
+  refreshInterval: 1h
+
+services:
+  gateway:
+    port: 8080
+    replicas: 3
+    public: true
+    resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { memory: 256Mi } }
+    autoscaling: { enabled: true, minReplicas: 3, maxReplicas: 12, cpu: 70 }
+    # who may call this service inside the cluster (NetworkPolicy)
+    allowFrom: []
+  identity:
+    port: 4001
+    replicas: 2
+    database: true
+    resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 384Mi } }
+    autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 }
+    allowFrom: [gateway, wallet, trade, giftcards, bills, risk]
+  wallet:
+    port: 4002
+    replicas: 2
+    database: true
+    resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 384Mi } }
+    autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 }
+    allowFrom: [gateway, trade, giftcards, bills]
+  trade:
+    port: 4003
+    replicas: 2
+    database: true
+    resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 384Mi } }
+    autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 6, cpu: 70 }
+    allowFrom: [gateway]
+  config:
+    port: 4004
+    replicas: 2
+    database: true
+    resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
+    autoscaling: { enabled: false }
+    allowFrom: [gateway, identity, wallet, trade, giftcards, bills]
+  giftcards:
+    port: 4005
+    replicas: 2
+    database: true
+    resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 384Mi } }
+    autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 6, cpu: 70 }
+    allowFrom: [gateway]
+  bills:
+    port: 4006
+    replicas: 2
+    database: true
+    resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 384Mi } }
+    autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 6, cpu: 70 }
+    allowFrom: [gateway]
+  risk:
+    port: 4007
+    replicas: 2
+    database: true
+    resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 384Mi } }
+    autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 6, cpu: 70 }
+    allowFrom: [gateway, wallet, trade, giftcards, bills]
+  notifications:
+    port: 4008
+    replicas: 2
+    database: true
+    resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
+    autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 6, cpu: 70 }
+    allowFrom: [gateway]
+
+# Admin dashboard (Next.js). Keep it off the public internet if you can (VPN / IP allowlist).
+admin:
+  enabled: true
+  port: 3001
+  replicas: 2
+  image: { repository: "", tag: "" }   # defaults to <image.registry>/willspot-admin:<image.tag>
+  resources: { requests: { cpu: 50m, memory: 192Mi }, limits: { memory: 384Mi } }
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  # cert-manager example: cert-manager.io/cluster-issuer: letsencrypt
+  api:
+    host: api.example.ng
+    tlsSecret: willspot-api-tls
+  admin:
+    host: admin.example.ng
+    tlsSecret: willspot-admin-tls
+    # Restrict admin to office/VPN ranges (nginx ingress annotation). Empty = no restriction.
+    allowCidrs: ""
+
+networkPolicy:
+  enabled: true
+  # Namespace label selector for the ingress controller (allowed to reach gateway and admin).
+  ingressNamespaceLabels: { kubernetes.io/metadata.name: ingress-nginx }
+  # Namespace allowed to scrape metrics (port 9464).
+  monitoringNamespaceLabels: { kubernetes.io/metadata.name: monitoring }
+
+migrations:
+  enabled: true
+  # Job runs after install and before every upgrade, using MIGRATOR_DATABASE_URL from each
+  # service Secret (schema owner). Pods use <SERVICE>_DATABASE_URL (rows only, no DDL).
+  backoffLimit: 6
+  activeDeadlineSeconds: 600
+
+monitoring:
+  # Needs the Prometheus Operator CRDs (ServiceMonitor, PrometheusRule).
+  serviceMonitor: false
+  prometheusRule: false
+  labels: {}
+
+backup:
+  enabled: true
+  schedule: "15 1 * * *"            # 02:15 Lagos time (01:15 UTC), daily
+  image: { repository: "", tag: "" } # defaults to <image.registry>/willspot-backup:<image.tag>
+  # Secret "<release>-backup" with: <SERVICE>_DATABASE_URL for each database (read-only backup role),
+  # BACKUP_DEST, BACKUP_S3_ENDPOINT, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and the age public key file.
+  ageRecipientsKey: age-recipients.txt
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  # Weekly restore drill into a scratch server (needs DRILL_ADMIN_URL and the age identity in "<release>-backup-drill").
+  drill:
+    enabled: false
+    schedule: "0 4 * * 0"
+
+podSecurity:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Spread replicas across nodes/zones so one failure doesn't take a service down.
+topologySpread: true

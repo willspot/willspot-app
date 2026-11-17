@@ -1,14 +1,18 @@
-import { createPool, loadVerifier } from "@willspot/common";
-import { DEFAULT_SEED, buildConfig } from "./app.js";
+import { createPool, loadVerifier, loadSecretFiles, migrateOnlyAndExit, serve } from "@willspot/common";
+import { DEFAULT_SEED, buildConfig, MIGRATIONS } from "./app.js";
 
+loadSecretFiles();
 const env = (k: string, d?: string) => {
   const v = process.env[k] ?? d;
   if (v === undefined) throw new Error(`Missing env ${k}`);
   return v;
 };
 
+const db = createPool(env("CONFIG_DATABASE_URL"));
+await migrateOnlyAndExit(db, MIGRATIONS, "config");
+
 const app = await buildConfig({
-  db: createPool(env("CONFIG_DATABASE_URL")),
+  db,
   verifier: await loadVerifier(env("JWT_PUBLIC_KEY")),
   seedFile: env("BRAND_SEED_FILE", DEFAULT_SEED),
   serviceTokens: {
@@ -20,4 +24,4 @@ const app = await buildConfig({
   },
 });
 
-await app.listen({ host: env("HOST", "0.0.0.0"), port: Number(env("PORT", "4004")) });
+await serve(app, { port: Number(env("PORT", "4004")) });

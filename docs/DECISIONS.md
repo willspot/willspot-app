@@ -72,3 +72,24 @@ A separate risk service screens every movement (synchronous, serialised per user
 
 ## ADR-020 — Device signals are hints, pinning is opt-in (2026-11-17)
 Root/jailbreak/emulator/debugger checks run natively and are sent as `x-device-signals`. They are trivially spoofable, so they feed risk scoring only. Play Integrity and App Attest are the stronger follow-ups. Certificate pinning is enabled per build (`PIN_CERTS=true`) with bundled PEMs, and the app refuses to start if pinning is on without them.
+
+## ADR-021 — Domain events through a transactional outbox and NATS JetStream (2026-11-17)
+Services that move money write an `outbox` row **in the same transaction** as the change. Postgres triggers write it, on deposits, withdrawals, orders, conversions, gift-card trades, bill payments and identity's audit log, so no code path can forget it. A relay in each service publishes committed rows to NATS JetStream (stream `WILLSPOT_EVENTS`, 7 days) one replica at a time, in commit order, and stops at the first failure. The stream drops repeats by event id (`Nats-Msg-Id`, 10-minute window) and consumers dedupe by id, so delivery is at-least-once with idempotent handling. Without `NATS_URL`, events wait in the outbox. Why: an event is sent if and only if the change committed, and a stopped consumer catches up (verified). NATS over Kafka: one small binary with built-in persistence, and enough at our scale.
+
+## ADR-022 — Notifications service: inbox first, push second (2026-11-17)
+A new service turns events into an in-app inbox entry (unique per event) and then a push via FCM HTTP v1, which covers Android directly and iOS through the APNs bridge. Push is best effort. Dead tokens (`UNREGISTERED`) are deleted, and users can mute money and account pushes but never security ones. Inbox texts never include full account numbers or card codes. The app enables push only when Firebase settings are passed at build time, so no Firebase files live in the repo. Registration tokens are used rather than the new FID "direct send", whose server format is UNVERIFIED.
+
+## ADR-023 — Per-admin roles with least privilege (2026-11-17)
+Roles: `super_admin`, `compliance`, `finance`, `support`, `operations`. Every admin route needs one permission (`users.read`, `kyc.review`, `money.manage`, `admins.manage`…), and roles travel in the access token. Only super admins manage staff. Nobody can change their own roles, and the last super admin can't be removed (serialised by an advisory lock). A role change ends the person's sessions. New staff get a separate work account with a 48-hour, single-use setup link that is stored hashed and passed in the URL fragment, so it never reaches server logs. A customer account is never promoted to staff. The dashboard hides what a role can't use, and the API enforces it.
+
+## ADR-024 — Customer two-factor sign-in with recovery codes; new-device alerts (2026-11-17)
+The phase 2 TOTP is now offered to customers too. Turning it on returns 10 single-use recovery codes, stored hashed. Support can reset a customer's 2FA only with a written reason, which is audited and ends all their sessions. Each install sends a stable random id at sign-in, and a sign-in from an unknown id, once the user has a known device, raises a security notification.
+
+## ADR-025 — Provider-neutral Kubernetes via Helm (2026-11-17)
+Plain Kubernetes objects only: Deployments, HPAs, PDBs, NetworkPolicies, Jobs, CronJobs, plus optional ExternalSecret, ServiceMonitor and PrometheusRule. No cloud-specific resources, so any Nigerian data centre or cloud with Kubernetes works. Migrations run as pre-install/pre-upgrade Jobs with the schema-owner role; pods hold row-only credentials (`MIGRATE_ON_START=0`). Each service reads only its own Secret. Background jobs use Postgres advisory locks so replicas don't duplicate work. Deploys are manual and approved, roll back automatically on failure, and are followed by a readiness check.
+
+## ADR-026 — Observability with OpenTelemetry, Prometheus and JSON logs (2026-11-17)
+Traces use the OpenTelemetry SDK 2.x line (pinned; the 3.x line was days old) with manual server spans and W3C propagation. Auto-instrumentation doesn't work with our bundled ESM builds. Metrics come from prom-client on a separate port 9464, labelled by route template. Logs carry `trace_id`. Exporters are vendor-neutral (OTLP), so the trace store can be self-hosted in-country.
+
+## ADR-027 — Encrypted logical backups with automated restore drills (2026-11-17)
+Daily `pg_dump -Fc` per database, encrypted with age to public keys (the backup job can't decrypt). Uploads go to an in-country S3-compatible bucket with SHA-256 manifests. A weekly drill restores into scratch databases and checks ledger invariants. A backup that has never been restored doesn't count. Point-in-time recovery from the managed database is recommended on top for an RPO under 24 h.

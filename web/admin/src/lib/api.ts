@@ -15,7 +15,7 @@ export async function api<T = Record<string, unknown>>(path: string, body?: unkn
     cache: "no-store",
   });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 && typeof window !== "undefined" && !location.pathname.startsWith("/login")) location.href = "/login";
+  if (r.status === 401 && typeof window !== "undefined" && !/^\/(login|setup)/.test(location.pathname)) location.href = "/login";
   if (!r.ok) throw new ApiError(r.status, j.error?.code ?? "error", j.error?.message ?? "Request failed");
   return j as T;
 }

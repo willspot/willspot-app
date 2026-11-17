@@ -29,12 +29,13 @@ export default function Ops() {
   const trade = useLoad<{ pendingSettlements: number; oldestPendingMinutes: number }>("/v1/admin/trade/health");
   const bills = useLoad<{ processing: number; oldestProcessingMinutes: number }>("/v1/admin/bills/health");
   const hooks = useLoad<{ items: Failure[] }>("/v1/admin/wallet/webhook-failures");
+  const push = useLoad<{ provider: string; notifications24h: number; pushFailures24h: number; devices: number }>("/v1/admin/notifications/health");
   const toast = useToast();
   const r = rec.data;
   return (
     <>
       <Header title="Operations" subtitle="Ledger reconciliation, stuck payments and webhook health.">
-        <button className="btn secondary" onClick={() => { rec.reload(); trade.reload(); bills.reload(); hooks.reload(); }}>Refresh</button>
+        <button className="btn secondary" onClick={() => { rec.reload(); trade.reload(); bills.reload(); hooks.reload(); push.reload(); }}>Refresh</button>
       </Header>
       <div className="grid stats">
         <Light ok={!!r?.ok} label="Ledger reconciles" detail={r ? (r.ok ? `Every asset nets to zero · ${r.balanceMismatches} balance mismatches` : `DRIFT: ${r.assets.filter((a) => Number(a.netBalance) !== 0).map((a) => `${a.asset} ${a.netBalance}`).join(", ") || ""} ${r.balanceMismatches} mismatched balances`) : "Checking…"} />
@@ -42,6 +43,11 @@ export default function Ops() {
         <Light ok={(trade.data?.pendingSettlements ?? 0) === 0 || (trade.data?.oldestPendingMinutes ?? 0) < 15} label="Trade settlement" detail={`${trade.data?.pendingSettlements ?? 0} pending · oldest ${trade.data?.oldestPendingMinutes ?? 0} min`} />
         <Light ok={(bills.data?.processing ?? 0) === 0 || (bills.data?.oldestProcessingMinutes ?? 0) < 15} label="Bill payments" detail={`${bills.data?.processing ?? 0} processing · oldest ${bills.data?.oldestProcessingMinutes ?? 0} min`} />
         <Light ok={(r?.webhookFailures24h ?? 0) < 5} label="Webhooks" detail={`${r?.webhookFailures24h ?? 0} failures in 24h`} />
+        <Light
+          ok={!!push.data && push.data.pushFailures24h <= Math.max(5, push.data.notifications24h * 0.2)}
+          label="Notifications"
+          detail={push.data ? `${push.data.notifications24h} in 24h · ${push.data.pushFailures24h} push failures · ${push.data.devices} devices · ${push.data.provider}` : "Checking…"}
+        />
       </div>
       <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
         <button

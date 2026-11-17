@@ -1,0 +1,53 @@
+# Prometheus alert rules. The same rules ship in the Helm chart as a PrometheusRule.
+# Thresholds are starting points, not calibrated on production traffic.
+groups:
+  - name: willspot-slo
+    rules:
+      - alert: WillSpotHighErrorRate
+        expr: |
+          sum by (service) (rate(http_server_request_duration_seconds_count{status="5xx"}[5m]))
+            / clamp_min(sum by (service) (rate(http_server_request_duration_seconds_count[5m])), 1e-9) > 0.02
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.service }}: more than 2% of requests are failing"
+      - alert: WillSpotSlowRequests
+        expr: |
+          histogram_quantile(0.95, sum by (service, le) (rate(http_server_request_duration_seconds_bucket[5m]))) > 1.5
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: "{{ $labels.service }}: p95 latency above 1.5 s"
+      - alert: WillSpotServiceDown
+        expr: up{job=~".*willspot.*"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.instance }} is not being scraped"
+  - name: willspot-money
+    rules:
+      - alert: WillSpotOutboxStuck
+        # Events are produced but not published (bus down or relay failing).
+        expr: increase(willspot_job_runs_total{job=~"outbox-relay-.*",result="error"}[10m]) > 5
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Outbox relay for {{ $labels.job }} keeps failing; notifications are delayed"
+      - alert: WillSpotBackgroundJobFailing
+        expr: increase(willspot_job_runs_total{result="error"}[30m]) > 3
+        labels: { severity: ticket }
+        annotations:
+          summary: "Background job {{ $labels.job }} failed {{ $value }} times in 30 min"
+      - alert: WillSpotPushFailures
+        expr: |
+          sum(rate(willspot_push_messages_total{result="error"}[15m]))
+            / clamp_min(sum(rate(willspot_push_messages_total[15m])), 1e-9) > 0.2
+        for: 15m
+        labels: { severity: ticket }
+        annotations:
+          summary: "More than 20% of push messages are failing (check FCM credentials)"
+      - alert: WillSpotEventHandlerErrors
+        expr: increase(willspot_events_handled_total{result="error"}[15m]) > 10
+        labels: { severity: ticket }
+        annotations:
+          summary: "Consumer {{ $labels.consumer }} is failing events (they will be redelivered)"

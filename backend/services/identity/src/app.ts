@@ -1,3 +1,4 @@
+import { randomBytes, randomInt } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
@@ -18,7 +19,7 @@ import {
   emailSchema,
   forbidden,
   hashSecret,
-  migrate,
+  migrateOnStart,
   notFound,
   numericCode,
   parse,
@@ -26,7 +27,7 @@ import {
   phoneSchema,
   pinSchema,
   randomToken,
-  requireAdmin,
+  requirePermission, type Permission,
   requireService,
   sha256,
   tooMany,
@@ -35,6 +36,10 @@ import {
   uuidSchema,
   verifySecret,
   type AuthUser,
+  type AdminRole,
+  ADMIN_ROLES,
+  isAdminRole,
+  permissionsFor,
   type Db,
   type StepUpScope,
 } from "@willspot/common";
@@ -81,6 +86,7 @@ interface UserRow {
   totp_secret_enc: string | null;
   totp_enabled: boolean;
   totp_last_step: string | null;
+  admin_roles: string[];
   locked_until: Date | null;
   pin_failures: number;
   pin_locked_until: Date | null;
@@ -99,14 +105,26 @@ const publicUser = (u: UserRow) => ({
   hasPin: u.pin_hash !== null,
   totpEnabled: u.totp_enabled,
   createdAt: u.created_at,
+  ...(u.role === "admin" ? { adminRoles: adminRoles(u), permissions: permissionsFor(adminRoles(u)) } : {}),
 });
+
+const adminRoles = (u: Pick<UserRow, "admin_roles">): AdminRole[] => (u.admin_roles ?? []).filter(isAdminRole);
+
+/** "abcde-fghij": 50 bits each, lowercase base32 without look-alike characters. */
+function recoveryCode(): string {
+  const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+  const bytes = randomBytes(10);
+  const chars = [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+  return `${chars.slice(0, 5)}-${chars.slice(5)}`;
+}
+const normaliseRecovery = (c: string) => c.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 
 const nameSchema = z.string().trim().min(1).max(60).regex(/^[\p{L}' -]+$/u, "Letters only");
 
 export async function buildIdentity(deps: IdentityDeps) {
   const { db, issuer, verifier } = deps;
-  await migrate(db, MIGRATIONS);
-  const app = await createApp("identity", { logger: deps.logger });
+  await migrateOnStart(db, MIGRATIONS);
+  const app = await createApp("identity", { logger: deps.logger, ready: () => db.query("SELECT 1") });
   const auth = authenticate(verifier);
 
   const totpSecret = (u: UserRow) => {
@@ -136,6 +154,15 @@ export async function buildIdentity(deps: IdentityDeps) {
   }
 
   async function startSession(u: UserRow, deviceId: string | undefined, userAgent: string | undefined, mfa = false) {
+    if (deviceId) {
+      // Tell the user when a device we haven't seen before signs in (only once they have a known device).
+      const seen = await db.query<{ known: boolean; any: boolean }>(
+        "SELECT coalesce(bool_or(device_id = $2), false) AS known, count(device_id) > 0 AS any FROM sessions WHERE user_id = $1",
+        [u.id, deviceId],
+      );
+      const r = seen.rows[0];
+      if (r?.any && !r.known) await audit(u.id, "login.new_device", u.id, { device: userAgent?.slice(0, 80) ?? "unknown device" });
+    }
     const refresh = randomToken(32);
     const s = await db.query<{ id: string }>(
       "INSERT INTO sessions(user_id, refresh_hash, device_id, user_agent, expires_at, mfa) VALUES ($1,$2,$3,$4, now() + make_interval(days => $5), $6) RETURNING id",
@@ -146,7 +173,7 @@ export async function buildIdentity(deps: IdentityDeps) {
   }
 
   async function tokensFor(u: UserRow, sid: string, refresh: string, mfa = false) {
-    const claims: AuthUser = { id: u.id, role: u.role, tier: u.kyc_tier, sid, ...(mfa ? { mfa: true } : {}) };
+    const claims: AuthUser = { id: u.id, role: u.role, tier: u.kyc_tier, sid, ...(mfa ? { mfa: true } : {}), ...(u.role === "admin" ? { roles: adminRoles(u) } : {}) };
     return { accessToken: await issuer.signAccess(claims), refreshToken: refresh, expiresIn: 900, user: publicUser(u) };
   }
 
@@ -213,7 +240,7 @@ export async function buildIdentity(deps: IdentityDeps) {
   // ---------- Login, refresh, logout ----------
 
   app.post("/v1/auth/login", async (req) => {
-    const body = parse(z.object({ email: emailSchema, password: z.string().min(1).max(128), deviceId: z.string().max(100).optional(), totp: z.string().max(10).optional() }), req.body);
+    const body = parse(z.object({ email: emailSchema, password: z.string().min(1).max(128), deviceId: z.string().max(100).optional(), totp: z.string().max(10).optional(), recoveryCode: z.string().max(20).optional() }), req.body);
     const u = (await db.query<UserRow>("SELECT * FROM users WHERE email=$1", [body.email])).rows[0];
     const fail = () => unauthorized("Email or password is incorrect");
     if (!u) {
@@ -240,6 +267,21 @@ export async function buildIdentity(deps: IdentityDeps) {
     }
     if (u.status !== "active") throw forbidden("This account is not active. Contact support.");
     let mfa = false;
+    if (u.totp_enabled && !body.totp && body.recoveryCode) {
+      const used = await db.query(
+        "UPDATE totp_recovery_codes SET used_at=now() WHERE user_id=$1 AND code_hash=$2 AND used_at IS NULL RETURNING 1",
+        [u.id, sha256(`${u.id}:${normaliseRecovery(body.recoveryCode)}`)],
+      );
+      if (!used.rowCount) {
+        const failures = u.failed_logins + 1;
+        const lock = failures >= MAX_LOGIN_FAILURES;
+        await db.query("UPDATE users SET failed_logins=$2, locked_until = CASE WHEN $3 THEN now() + make_interval(mins => $4) ELSE locked_until END WHERE id=$1", [u.id, lock ? 0 : failures, lock, LOGIN_LOCK_MINUTES]);
+        throw new AppError(401, "recovery_invalid", "That recovery code is wrong or already used");
+      }
+      await audit(u.id, "totp.recovery_used", u.id);
+      await db.query("UPDATE users SET failed_logins=0, locked_until=NULL WHERE id=$1", [u.id]);
+      return startSession(u, body.deviceId, req.headers["user-agent"], true);
+    }
     if (u.totp_enabled) {
       if (!body.totp) throw new AppError(401, "totp_required", "Enter the 6-digit code from your authenticator app");
       const step = verifyTotp(totpSecret(u), body.totp, u.totp_last_step === null ? null : Number(u.totp_last_step));
@@ -254,6 +296,20 @@ export async function buildIdentity(deps: IdentityDeps) {
     }
     await db.query("UPDATE users SET failed_logins=0, locked_until=NULL WHERE id=$1", [u.id]);
     return startSession(u, body.deviceId, req.headers["user-agent"], mfa);
+  });
+
+  /** New staff set their password with the one-time token from /v1/admin/admins. */
+  app.post("/v1/auth/admin-setup", async (req) => {
+    const b = parse(z.object({ token: z.string().min(20).max(100), password: passwordSchema }), req.body);
+    const hash = await hashSecret(b.password);
+    const userId = await tx(db, async (c) => {
+      const inv = (await c.query<{ user_id: string }>("UPDATE admin_invites SET used_at=now() WHERE token_hash=$1 AND used_at IS NULL AND expires_at > now() RETURNING user_id", [sha256(b.token)])).rows[0];
+      if (!inv) throw unauthorized("This setup link is invalid, used or expired. Ask a super admin for a new one.");
+      await c.query("UPDATE users SET password_hash=$2, failed_logins=0, locked_until=NULL WHERE id=$1 AND role='admin'", [inv.user_id, hash]);
+      await c.query("INSERT INTO audit_log(actor_id, action, target) VALUES ($1,'admin.setup_completed',$2)", [inv.user_id, inv.user_id]);
+      return inv.user_id;
+    });
+    return { ok: true, userId, message: "Password set. Sign in, then turn on two-factor sign-in." };
   });
 
   app.post("/v1/auth/refresh", async (req) => {
@@ -347,8 +403,9 @@ export async function buildIdentity(deps: IdentityDeps) {
     const step = verifyTotp(totpSecret(u), code, null);
     if (step === null) throw badRequest("totp_invalid", "That code didn't match. Check your phone's clock and try again.");
     await db.query("UPDATE users SET totp_enabled=true, totp_last_step=$2 WHERE id=$1", [u.id, step]);
+    const recoveryCodes = await newRecoveryCodes(u.id);
     await audit(u.id, "totp.enabled", u.id);
-    return { ok: true, message: "Two-factor sign-in is on. Sign in again to get a two-factor session." };
+    return { ok: true, recoveryCodes, message: "Two-factor sign-in is on. Save your recovery codes somewhere safe; each works once if you lose your phone." };
   });
 
   app.post("/v1/me/totp/disable", { preHandler: auth }, async (req) => {
@@ -358,9 +415,37 @@ export async function buildIdentity(deps: IdentityDeps) {
     if (!(await verifySecret(b.password, u.password_hash))) throw unauthorized("Password is incorrect");
     if (verifyTotp(totpSecret(u), b.code, u.totp_last_step === null ? null : Number(u.totp_last_step)) === null) throw unauthorized("That code is wrong");
     await db.query("UPDATE users SET totp_enabled=false, totp_secret_enc=NULL, totp_last_step=NULL WHERE id=$1", [u.id]);
+    await db.query("DELETE FROM totp_recovery_codes WHERE user_id=$1", [u.id]);
     await db.query("UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL AND id <> $2", [u.id, currentUser(req).sid]);
     await audit(u.id, "totp.disabled", u.id);
     return { ok: true };
+  });
+
+  async function newRecoveryCodes(userId: string): Promise<string[]> {
+    const codes = Array.from({ length: 10 }, recoveryCode);
+    await tx(db, async (c) => {
+      await c.query("DELETE FROM totp_recovery_codes WHERE user_id=$1", [userId]);
+      for (const code of codes) await c.query("INSERT INTO totp_recovery_codes(user_id, code_hash) VALUES ($1,$2)", [userId, sha256(`${userId}:${normaliseRecovery(code)}`)]);
+    });
+    return codes;
+  }
+
+  app.get("/v1/me/totp/recovery-codes", { preHandler: auth }, async (req) => {
+    const r = await db.query<{ n: string }>("SELECT count(*) AS n FROM totp_recovery_codes WHERE user_id=$1 AND used_at IS NULL", [currentUser(req).id]);
+    return { remaining: Number(r.rows[0]!.n) };
+  });
+
+  /** New set of recovery codes (old ones stop working). Needs password and a current code. */
+  app.post("/v1/me/totp/recovery-codes", { preHandler: auth }, async (req) => {
+    const b = parse(z.object({ password: z.string().min(1).max(128), code: z.string().regex(/^\d{6}$/) }), req.body);
+    const u = await getUser(currentUser(req).id);
+    if (!u?.totp_enabled) throw badRequest("totp_off", "Two-factor sign-in is not on");
+    if (!(await verifySecret(b.password, u.password_hash))) throw unauthorized("Password is incorrect");
+    const step = verifyTotp(totpSecret(u), b.code, u.totp_last_step === null ? null : Number(u.totp_last_step));
+    if (step === null) throw unauthorized("That code is wrong");
+    await db.query("UPDATE users SET totp_last_step=$2 WHERE id=$1", [u.id, step]);
+    await audit(u.id, "totp.recovery_regenerated", u.id);
+    return { recoveryCodes: await newRecoveryCodes(u.id) };
   });
 
   app.post("/v1/me/delete", { preHandler: auth }, async (req) => {
@@ -423,9 +508,9 @@ export async function buildIdentity(deps: IdentityDeps) {
 
   // ---------- Admin ----------
 
-  const admin = { preHandler: [auth, requireAdmin] };
+  const perm = (p: Permission) => ({ preHandler: [auth, requirePermission(p)] });
 
-  app.get("/v1/admin/users", admin, async (req) => {
+  app.get("/v1/admin/users", perm("users.read"), async (req) => {
     const q = parse(z.object({ q: z.string().max(100).optional(), limit: z.coerce.number().int().min(1).max(100).default(50), offset: z.coerce.number().int().min(0).default(0) }), req.query);
     const like = q.q ? `%${q.q.toLowerCase()}%` : null;
     const rows = await db.query<UserRow>(
@@ -436,7 +521,7 @@ export async function buildIdentity(deps: IdentityDeps) {
     return { items: rows.rows.map(publicUser), total: Number(total.rows[0]!.n) };
   });
 
-  app.get("/v1/admin/stats", admin, async () => {
+  app.get("/v1/admin/stats", perm("users.read"), async () => {
     const r = await db.query<{ total: string; active: string; tier1: string; tier2: string; pending_kyc: string }>(
       `SELECT count(*) AS total,
               count(*) FILTER (WHERE status='active') AS active,
@@ -449,7 +534,7 @@ export async function buildIdentity(deps: IdentityDeps) {
     return { users: Number(x.total), active: Number(x.active), tier1: Number(x.tier1), tier2: Number(x.tier2), pendingKyc: Number(x.pending_kyc) };
   });
 
-  app.post("/v1/admin/users/:id/status", admin, async (req) => {
+  app.post("/v1/admin/users/:id/status", perm("users.suspend"), async (req) => {
     const { id } = parse(z.object({ id: uuidSchema }), req.params);
     const { status, reason } = parse(z.object({ status: z.enum(["active", "suspended"]), reason: z.string().min(3).max(300) }), req.body);
     const r = await db.query("UPDATE users SET status=$2 WHERE id=$1 AND role='user' AND status IN ('active','suspended') RETURNING id", [id, status]);
@@ -459,7 +544,7 @@ export async function buildIdentity(deps: IdentityDeps) {
     return { ok: true };
   });
 
-  app.get("/v1/admin/kyc", admin, async (req) => {
+  app.get("/v1/admin/kyc", perm("kyc.review"), async (req) => {
     const { status } = parse(z.object({ status: z.enum(["pending", "approved", "rejected"]).default("pending") }), req.query);
     const rows = await db.query(
       `SELECT k.id, k.user_id, k.level, k.status, k.id_type, k.id_last4, k.selfie_ref, k.reason, k.created_at,
@@ -471,7 +556,7 @@ export async function buildIdentity(deps: IdentityDeps) {
     return { items: rows.rows };
   });
 
-  app.post("/v1/admin/kyc/:id/decision", admin, async (req) => {
+  app.post("/v1/admin/kyc/:id/decision", perm("kyc.review"), async (req) => {
     const { id } = parse(z.object({ id: uuidSchema }), req.params);
     const body = parse(z.object({ decision: z.enum(["approved", "rejected"]), reason: z.string().max(300).optional() }), req.body);
     if (body.decision === "rejected" && !body.reason) throw badRequest("reason_required", "Give a reason when rejecting");
@@ -485,7 +570,75 @@ export async function buildIdentity(deps: IdentityDeps) {
     return { ok: true };
   });
 
-  app.get("/v1/admin/audit", admin, async () => {
+  // ---------- Support: reset a customer's two-factor sign-in ----------
+
+  app.post("/v1/admin/users/:id/reset-2fa", perm("users.reset_2fa"), async (req) => {
+    const { id } = parse(z.object({ id: uuidSchema }), req.params);
+    const { reason } = parse(z.object({ reason: z.string().trim().min(10).max(300) }), req.body);
+    const r = await db.query("UPDATE users SET totp_enabled=false, totp_secret_enc=NULL, totp_last_step=NULL WHERE id=$1 AND role='user' AND totp_enabled RETURNING id", [id]);
+    if (!r.rowCount) throw notFound("Customer not found or two-factor sign-in is not on");
+    await db.query("DELETE FROM totp_recovery_codes WHERE user_id=$1", [id]);
+    await db.query("UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [id]);
+    await audit(currentUser(req).id, "totp.reset", id, { reason });
+    return { ok: true };
+  });
+
+  // ---------- Staff accounts and roles (super admin only) ----------
+
+  const adminView = (u: UserRow) => ({
+    id: u.id, email: u.email, firstName: u.first_name, lastName: u.last_name, status: u.status,
+    roles: adminRoles(u), totpEnabled: u.totp_enabled, createdAt: u.created_at,
+  });
+  const rolesSchema = z.array(z.enum(ADMIN_ROLES)).max(ADMIN_ROLES.length).transform((r) => [...new Set(r)]);
+
+  app.get("/v1/admin/admins", perm("admins.manage"), async () => {
+    const rows = await db.query<UserRow>("SELECT * FROM users WHERE role='admin' ORDER BY created_at");
+    return { items: rows.rows.map(adminView), roles: Object.fromEntries(ADMIN_ROLES.map((r) => [r, permissionsFor([r])])) };
+  });
+
+  /** Creates a staff account and returns a one-time setup token (shown once; send it out of band). */
+  app.post("/v1/admin/admins", perm("admins.manage"), async (req, reply) => {
+    const b = parse(z.object({ email: emailSchema, phone: phoneSchema, firstName: nameSchema, lastName: nameSchema, roles: rolesSchema.refine((r) => r.length > 0, "Pick at least one role") }), req.body);
+    const actor = currentUser(req).id;
+    const token = randomToken(32);
+    const created = await tx(db, async (c) => {
+      const exists = await c.query("SELECT 1 FROM users WHERE email=$1 OR phone=$2", [b.email, b.phone]);
+      if (exists.rowCount) throw conflict("exists", "Someone already uses that email or phone. Staff need their own work account.");
+      const u = (await c.query<UserRow>(
+        "INSERT INTO users(email, phone, first_name, last_name, password_hash, role, status, kyc_tier, admin_roles) VALUES ($1,$2,$3,$4,$5,'admin','active',2,$6) RETURNING *",
+        [b.email, b.phone, b.firstName, b.lastName, await hashSecret(randomToken(32)), b.roles],
+      )).rows[0]!;
+      await c.query("INSERT INTO admin_invites(token_hash, user_id, created_by, expires_at) VALUES ($1,$2,$3, now() + interval '48 hours')", [sha256(token), u.id, actor]);
+      await c.query("INSERT INTO audit_log(actor_id, action, target, meta) VALUES ($1,'admin.created',$2,$3)", [actor, u.id, { roles: b.roles }]);
+      return u;
+    });
+    reply.status(201);
+    return { admin: adminView(created), setupToken: token, expiresInHours: 48 };
+  });
+
+  app.post("/v1/admin/admins/:id/roles", perm("admins.manage"), async (req) => {
+    const { id } = parse(z.object({ id: uuidSchema }), req.params);
+    const { roles } = parse(z.object({ roles: rolesSchema }), req.body);
+    const actor = currentUser(req).id;
+    if (id === actor) throw forbidden("You can't change your own roles. Ask another super admin.");
+    await tx(db, async (c) => {
+      // Serialise role changes so two requests can't remove the last two super admins at once.
+      await c.query("SELECT pg_advisory_xact_lock(hashtext('admin_roles'))");
+      const u = (await c.query<UserRow>("SELECT * FROM users WHERE id=$1 AND role='admin' FOR UPDATE", [id])).rows[0];
+      if (!u) throw notFound("Admin not found");
+      if (adminRoles(u).includes("super_admin") && !roles.includes("super_admin")) {
+        const others = await c.query("SELECT 1 FROM users WHERE role='admin' AND status='active' AND 'super_admin' = ANY(admin_roles) AND id <> $1", [id]);
+        if (!others.rowCount) throw conflict("last_super_admin", "Keep at least one super admin");
+      }
+      await c.query("UPDATE users SET admin_roles=$2 WHERE id=$1", [id, roles]);
+      // New roles apply at next sign-in; end current sessions so old permissions can't linger.
+      await c.query("UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [id]);
+      await c.query("INSERT INTO audit_log(actor_id, action, target, meta) VALUES ($1,'admin.roles_changed',$2,$3)", [actor, id, { from: adminRoles(u), to: roles }]);
+    });
+    return { ok: true };
+  });
+
+  app.get("/v1/admin/audit", perm("audit.read"), async () => {
     const rows = await db.query("SELECT id, actor_id, action, target, meta, at FROM audit_log ORDER BY id DESC LIMIT 200");
     return { items: rows.rows };
   });
@@ -513,8 +666,9 @@ export async function seedAdmin(db: Db, email: string, password: string) {
   const exists = await db.query("SELECT 1 FROM users WHERE email=$1", [e]);
   if (exists.rowCount) return false;
   await db.query(
-    "INSERT INTO users(email, phone, first_name, last_name, password_hash, role, status, kyc_tier) VALUES ($1,'+2340000000000','Admin','User',$2,'admin','active',2)",
-    [e, await hashSecret(password)],
+    "INSERT INTO users(email, phone, first_name, last_name, password_hash, role, status, kyc_tier, admin_roles) VALUES ($1,$3,'Admin','User',$2,'admin','active',2,'{super_admin}')",
+    // Placeholder phone (unique, never a real number: +234000…); staff created later give a real one.
+    [e, await hashSecret(password), `+234000${String(randomInt(0, 10_000_000)).padStart(7, "0")}`],
   );
   return true;
 }

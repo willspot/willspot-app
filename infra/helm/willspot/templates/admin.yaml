@@ -1,0 +1,72 @@
+{{- if .Values.admin.enabled }}
+{{- $name := "admin" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "willspot.fullname" . }}-admin
+  labels:
+    {{- include "willspot.labels" . | nindent 4 }}
+    {{- include "willspot.selector" (dict "root" . "name" $name) | nindent 4 }}
+spec:
+  replicas: {{ .Values.admin.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: {{- include "willspot.selector" (dict "root" . "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "willspot.labels" . | nindent 8 }}
+        {{- include "willspot.selector" (dict "root" . "name" $name) | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- include "willspot.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: admin
+          image: {{ include "willspot.image" (dict "root" . "name" $name "image" .Values.admin.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: {{ .Values.admin.port }} }
+          env:
+            # The admin BFF talks to the gateway inside the cluster; tokens stay in httpOnly cookies.
+            - { name: GATEWAY_URL, value: {{ printf "http://%s-gateway:%v" (include "willspot.fullname" .) .Values.services.gateway.port | quote }} }
+            - { name: PORT, value: {{ .Values.admin.port | quote }} }
+          readinessProbe:
+            httpGet: { path: /login, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /login, port: http }
+            periodSeconds: 20
+          resources: {{- toYaml .Values.admin.resources | nindent 12 }}
+          securityContext: {{- include "willspot.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: cache, mountPath: /app/admin/.next/cache }
+      volumes:
+        - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+        - { name: cache, emptyDir: { sizeLimit: 256Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "willspot.fullname" . }}-admin
+  labels: {{- include "willspot.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "willspot.selector" (dict "root" . "name" $name) | nindent 4 }}
+  ports:
+    - { name: http, port: {{ .Values.admin.port }}, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "willspot.fullname" . }}-admin
+  labels: {{- include "willspot.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- include "willspot.selector" (dict "root" . "name" $name) | nindent 6 }}
+{{- end }}

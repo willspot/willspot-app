@@ -126,7 +126,7 @@ describe("trade service", () => {
   });
 
   it("lets admins change spreads and pause a pair", async () => {
-    const adminT = await issuer.signAccess({ id: randomUUID(), role: "admin", tier: 2, sid: "s" });
+    const adminT = await issuer.signAccess({ id: randomUUID(), role: "admin", roles: ["super_admin"], tier: 2, sid: "s" });
     const u = await fundedUser("10000");
     expect((await call(trade, "POST", "/v1/admin/trade/pairs/BTC", u.token, {})).statusCode).toBe(403);
     const r = await call(trade, "POST", "/v1/admin/trade/pairs/BTC", adminT, { enabled: false, buySpreadBps: 200, sellSpreadBps: 200, minNgn: "1000", maxNgn: "5000000" });
@@ -135,5 +135,12 @@ describe("trade service", () => {
     expect(q.json().error.code).toBe("pair_disabled");
     const pairs = (await call(trade, "GET", "/v1/admin/trade/pairs", adminT)).json();
     expect(pairs.items.find((p: { asset: string }) => p.asset === "BTC").buySpreadBps).toBe(200);
+  });
+
+  it("writes an outbox event for each completed money movement (ADR-021)", async () => {
+    const types = new Set<string>();
+    for (const d of dbs) for (const r of (await d.db.query<{ type: string }>("SELECT type FROM outbox")).rows) types.add(r.type);
+    expect([...types]).toEqual(expect.arrayContaining(["trade.order_completed"]));
+    console.log("outbox types:", [...types].sort().join(", "));
   });
 });

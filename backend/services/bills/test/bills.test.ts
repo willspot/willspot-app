@@ -110,4 +110,11 @@ describe("bill payments", () => {
     expect((await pay(u, { billerId: "ekedc_prepaid", customerId: "45012345678", amount: "150000" })).json().error.code).toBe("insufficient_funds");
     expect(await ngn(u.token)).toBe("20000.00");
   });
+
+  it("writes an outbox event for each completed money movement (ADR-021)", async () => {
+    const types = new Set<string>();
+    for (const d of dbs) for (const r of (await d.db.query<{ type: string }>("SELECT type FROM outbox")).rows) types.add(r.type);
+    expect([...types]).toEqual(expect.arrayContaining(["bills.payment_completed", "bills.payment_failed"]));
+    console.log("outbox types:", [...types].sort().join(", "));
+  });
 });

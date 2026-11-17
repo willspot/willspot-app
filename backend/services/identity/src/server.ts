@@ -1,7 +1,8 @@
-import { FieldCipher, FlagsClient, createPool, loadIssuer, loadVerifier } from "@willspot/common";
-import { buildIdentity, seedAdmin } from "./app.js";
+import { FieldCipher, FlagsClient, createPool, loadIssuer, loadVerifier, busFromEnv, loadSecretFiles, migrateOnlyAndExit, serve, startOutboxRelay } from "@willspot/common";
+import { buildIdentity, seedAdmin, MIGRATIONS } from "./app.js";
 import { DojahKycProvider, SandboxKycProvider, SandboxOtpSender, TermiiOtpSender, type KycProvider, type OtpSender } from "./providers.js";
 
+loadSecretFiles();
 const env = (k: string, d?: string) => {
   const v = process.env[k] ?? d;
   if (v === undefined) throw new Error(`Missing env ${k}`);
@@ -28,6 +29,7 @@ if (production && (otp instanceof SandboxOtpSender || kyc instanceof SandboxKycP
 }
 
 const db = createPool(env("IDENTITY_DATABASE_URL"));
+await migrateOnlyAndExit(db, MIGRATIONS, "identity");
 const app = await buildIdentity({
   db,
   issuer: await loadIssuer(env("JWT_PRIVATE_KEY")),
@@ -54,4 +56,15 @@ if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
   if (await seedAdmin(db, process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD)) app.log.info("seeded first admin account");
 }
 
-await app.listen({ host: env("HOST", "0.0.0.0"), port: Number(env("PORT", "4001")) });
+// Publish committed outbox events (ADR-021). Without NATS_URL they wait in the outbox.
+const bus = await busFromEnv("identity", (m, e) => app.log.warn({ err: e }, m));
+const stopRelay = bus ? startOutboxRelay(db, bus, "identity", (e) => app.log.error({ err: e }, "outbox relay failed")) : undefined;
+
+await serve(app, {
+  port: Number(env("PORT", "4001")),
+  onShutdown: async () => {
+    stopRelay?.();
+    await bus?.close();
+    await db.end();
+  },
+});

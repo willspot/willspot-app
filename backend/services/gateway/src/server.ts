@@ -1,5 +1,7 @@
+import { loadSecretFiles, serve } from "@willspot/common";
 import { buildGateway } from "./app.js";
 
+loadSecretFiles();
 const env = (k: string, d?: string) => {
   const v = process.env[k] ?? d;
   if (v === undefined) throw new Error(`Missing env ${k}`);
@@ -15,10 +17,11 @@ const app = await buildGateway({
     giftcards: env("GIFTCARDS_INTERNAL_URL", "http://localhost:4005"),
     bills: env("BILLS_INTERNAL_URL", "http://localhost:4006"),
     risk: env("RISK_INTERNAL_URL", "http://localhost:4007"),
+    notifications: env("NOTIFICATIONS_INTERNAL_URL", "http://localhost:4008"),
   },
   corsOrigins: env("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001").split(",").map((s) => s.trim()).filter(Boolean),
   redisUrl: process.env.REDIS_URL || undefined,
   rateLimit: { general: Number(env("RATE_LIMIT_GENERAL", "300")), strict: Number(env("RATE_LIMIT_STRICT", "20")) },
 });
 
-await app.listen({ host: env("HOST", "0.0.0.0"), port: Number(env("PORT", "8080")) });
+await serve(app, { port: Number(env("PORT", "8080")) });

@@ -42,6 +42,7 @@ const values: Record<string, string> = {
   GIFTCARDS_DATABASE_URL: `${dbBase}/willspot_giftcards`,
   BILLS_DATABASE_URL: `${dbBase}/willspot_bills`,
   RISK_DATABASE_URL: `${dbBase}/willspot_risk`,
+  NOTIFICATIONS_DATABASE_URL: `${dbBase}/willspot_notifications`,
 };
 const env = example
   .split("\n")

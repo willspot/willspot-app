@@ -1,0 +1,7 @@
+apiVersion: v2
+name: willspot
+description: WillSpot backend services, admin dashboard, migrations and backups (provider-neutral Kubernetes)
+type: application
+version: 0.4.0
+appVersion: "0.4.0"
+kubeVersion: ">=1.27.0-0"

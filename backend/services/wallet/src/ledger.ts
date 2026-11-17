@@ -55,7 +55,9 @@ export async function postJournal(c: Tx, j: JournalInput): Promise<{ journalId: 
     )
   ).rows[0]!.id;
 
-  const resolved = await Promise.all(j.legs.map(async (l) => ({ ...l, accountId: await ensureAccount(c, l.code, l.asset) })));
+  // One query at a time: a transaction client can't run queries in parallel (pg 9 removes the implicit queue).
+  const resolved: (Leg & { accountId: string })[] = [];
+  for (const l of j.legs) resolved.push({ ...l, accountId: await ensureAccount(c, l.code, l.asset) });
   // Fixed lock order (by account id) prevents deadlocks between concurrent journals.
   resolved.sort((a, b) => (a.accountId < b.accountId ? -1 : 1));
   for (const l of resolved) {

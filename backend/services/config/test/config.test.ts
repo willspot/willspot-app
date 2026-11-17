@@ -36,7 +36,7 @@ describe("config service", () => {
   });
 
   it("lets an admin rebrand, versioned with history, and validates input", async () => {
-    const admin = await issuer.signAccess({ id: randomUUID(), role: "admin", tier: 2, sid: "s" });
+    const admin = await issuer.signAccess({ id: randomUUID(), role: "admin", roles: ["super_admin"], tier: 2, sid: "s" });
     const cur = (await app.inject({ method: "GET", url: "/v1/config/public" })).json().brand;
     const next = { ...cur, name: "SpotPay", colors: { ...cur.colors, primary: "#FF5500" } };
     const r = await app.inject({ method: "POST", url: "/v1/admin/config/brand", payload: { brand: next }, headers: { authorization: `Bearer ${admin}` } });
@@ -51,7 +51,7 @@ describe("config service", () => {
   });
 
   it("toggles flags for admins only and exposes them to services", async () => {
-    const admin = await issuer.signAccess({ id: randomUUID(), role: "admin", tier: 2, sid: "s" });
+    const admin = await issuer.signAccess({ id: randomUUID(), role: "admin", roles: ["super_admin"], tier: 2, sid: "s" });
     const user = await issuer.signAccess({ id: randomUUID(), role: "user", tier: 2, sid: "s" });
     const flags = { signups: true, deposits: true, withdrawals: false, crypto_trading: true, gift_cards: false, usd_account: false, bill_payments: false };
     expect((await app.inject({ method: "POST", url: "/v1/admin/config/flags", payload: { flags }, headers: { authorization: `Bearer ${user}` } })).statusCode).toBe(403);

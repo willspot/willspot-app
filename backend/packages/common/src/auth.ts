@@ -11,6 +11,47 @@ export interface AuthUser {
   sid: string;
   /** True when this session was signed in with a second factor (TOTP). */
   mfa?: boolean;
+  /** Admin roles (ADR-023). Only meaningful when role = "admin". */
+  roles?: AdminRole[];
+}
+
+/**
+ * Per-admin roles. Each admin route needs one permission; roles bundle permissions.
+ * Least privilege: support staff can look things up but cannot move money or change
+ * config; only a super admin can manage other admins.
+ */
+export const PERMISSIONS = [
+  "users.read", "users.suspend", "users.reset_2fa",
+  "kyc.review",
+  "risk.manage", "risk.reports",
+  "giftcards.review",
+  "money.read", "money.manage",
+  "ops.read",
+  "config.manage",
+  "audit.read",
+  "admins.manage",
+] as const;
+export type Permission = (typeof PERMISSIONS)[number];
+
+export const ADMIN_ROLES = ["super_admin", "compliance", "finance", "support", "operations"] as const;
+export type AdminRole = (typeof ADMIN_ROLES)[number];
+
+export const ROLE_PERMISSIONS: Record<AdminRole, readonly Permission[]> = {
+  super_admin: PERMISSIONS,
+  compliance: ["users.read", "users.suspend", "kyc.review", "risk.manage", "risk.reports", "giftcards.review", "money.read", "audit.read"],
+  finance: ["users.read", "money.read", "money.manage", "giftcards.review", "ops.read"],
+  support: ["users.read", "users.reset_2fa", "money.read"],
+  operations: ["ops.read", "money.read", "config.manage"],
+};
+
+export const isAdminRole = (r: unknown): r is AdminRole => typeof r === "string" && (ADMIN_ROLES as readonly string[]).includes(r);
+
+export function permissionsFor(roles: readonly AdminRole[] | undefined): Permission[] {
+  return [...new Set((roles ?? []).flatMap((r) => ROLE_PERMISSIONS[r] ?? []))];
+}
+
+export function can(u: AuthUser | undefined, p: Permission): boolean {
+  return u?.role === "admin" && permissionsFor(u.roles).includes(p);
 }
 
 const ISSUER = "willspot-identity";
@@ -24,7 +65,7 @@ export class TokenIssuer {
   constructor(private readonly key: CryptoKey) {}
 
   signAccess(u: AuthUser, ttl = "15m"): Promise<string> {
-    return new SignJWT({ role: u.role, tier: u.tier, sid: u.sid, ...(u.mfa ? { mfa: true } : {}) })
+    return new SignJWT({ role: u.role, tier: u.tier, sid: u.sid, ...(u.mfa ? { mfa: true } : {}), ...(u.role === "admin" ? { roles: u.roles ?? [] } : {}) })
       .setProtectedHeader({ alg: ALG })
       .setIssuer(ISSUER)
       .setAudience(AUD_ACCESS)
@@ -55,7 +96,8 @@ export class TokenVerifier {
     try {
       const { payload } = await jwtVerify(token, this.key, { issuer: ISSUER, audience: AUD_ACCESS, algorithms: [ALG] });
       const role = payload.role === "admin" ? "admin" : "user";
-      return { id: String(payload.sub), role, tier: Number(payload.tier ?? 0), sid: String(payload.sid ?? ""), ...(payload.mfa === true ? { mfa: true } : {}) };
+      const roles = role === "admin" ? (Array.isArray(payload.roles) ? payload.roles.filter(isAdminRole) : []) : undefined;
+      return { id: String(payload.sub), role, tier: Number(payload.tier ?? 0), sid: String(payload.sid ?? ""), ...(payload.mfa === true ? { mfa: true } : {}), ...(roles ? { roles } : {}) };
     } catch {
       throw unauthorized("Session expired or invalid");
     }
@@ -99,6 +141,14 @@ export async function requireAdmin(req: FastifyRequest, _reply: FastifyReply) {
   if (process.env.ADMIN_REQUIRE_MFA === "1" && !req.user.mfa) {
     throw new AppError(403, "mfa_required", "Sign in with your authenticator code to use admin tools");
   }
+}
+
+/** Admin route guard: an admin (with MFA when required) whose roles grant `p`. */
+export function requirePermission(p: Permission) {
+  return async (req: FastifyRequest, reply: FastifyReply) => {
+    await requireAdmin(req, reply);
+    if (!can(req.user, p)) throw new AppError(403, "permission_denied", `Your admin role doesn't allow this (needs ${p})`);
+  };
 }
 
 export function currentUser(req: FastifyRequest): AuthUser {

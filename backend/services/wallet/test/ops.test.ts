@@ -84,7 +84,7 @@ describe("ops", () => {
 
   it("logs failed webhook calls for the ops page", async () => {
     await app.inject({ method: "POST", url: "/v1/webhooks/deposits", payload: { reference: "bad-sig-001" }, headers: { "x-signature": "nope" } });
-    const admin = await issuer.signAccess({ id: randomUUID(), role: "admin", tier: 2, sid: "s" });
+    const admin = await issuer.signAccess({ id: randomUUID(), role: "admin", roles: ["super_admin"], tier: 2, sid: "s" });
     const r = (await app.inject({ method: "GET", url: "/v1/admin/wallet/webhook-failures", headers: { authorization: `Bearer ${admin}` } })).json();
     expect(r.items[0]).toMatchObject({ route: "/v1/webhooks/deposits", status: 401, reference: "bad-sig-001" });
   });

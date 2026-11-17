@@ -1,0 +1,128 @@
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "willspot.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "willspot.labels" $ | nindent 4 }}
+    {{- include "willspot.selector" (dict "root" $ "name" $name) | nindent 4 }}
+spec:
+  {{- if not (and $svc.autoscaling $svc.autoscaling.enabled) }}
+  replicas: {{ $svc.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }   # zero-downtime rollouts
+  selector:
+    matchLabels: {{- include "willspot.selector" (dict "root" $ "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "willspot.labels" $ | nindent 8 }}
+        {{- include "willspot.selector" (dict "root" $ "name" $name) | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "willspot.fullname" $ }}-{{ $name }}
+      automountServiceAccountToken: false
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- include "willspot.podSecurityContext" $ | nindent 8 }}
+      # Longer than SHUTDOWN_DRAIN_MS + in-flight requests + cleanup (see common/runtime.ts).
+      terminationGracePeriodSeconds: 40
+      {{- if $.Values.topologySpread }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "willspot.selector" (dict "root" $ "name" $name) | nindent 14 }}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "willspot.selector" (dict "root" $ "name" $name) | nindent 14 }}
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "willspot.image" (dict "root" $ "name" $name "image" $svc.image) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: {{ $svc.port }} }
+            - { name: metrics, containerPort: 9464 }
+          env:
+            - { name: PORT, value: {{ $svc.port | quote }} }
+            - { name: HOST, value: "0.0.0.0" }
+          envFrom:
+            - configMapRef: { name: {{ include "willspot.fullname" $ }}-config }
+            - secretRef: { name: {{ include "willspot.fullname" $ }}-{{ $name }}, optional: {{ not $svc.database }} }
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            # 503 while draining after SIGTERM, or when the database is unreachable.
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            failureThreshold: 2
+          resources: {{- toYaml $svc.resources | nindent 12 }}
+          securityContext: {{- include "willspot.containerSecurityContext" $ | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "willspot.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "willspot.labels" $ | nindent 4 }}
+    {{- include "willspot.selector" (dict "root" $ "name" $name) | nindent 4 }}
+spec:
+  selector: {{- include "willspot.selector" (dict "root" $ "name" $name) | nindent 4 }}
+  ports:
+    - { name: http, port: {{ $svc.port }}, targetPort: http }
+    - { name: metrics, port: 9464, targetPort: metrics }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "willspot.fullname" $ }}-{{ $name }}
+  labels: {{- include "willspot.labels" $ | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- include "willspot.selector" (dict "root" $ "name" $name) | nindent 6 }}
+{{- if and $svc.autoscaling $svc.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "willspot.fullname" $ }}-{{ $name }}
+  labels: {{- include "willspot.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "willspot.fullname" $ }}-{{ $name }}
+  minReplicas: {{ $svc.autoscaling.minReplicas }}
+  maxReplicas: {{ $svc.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: {{ $svc.autoscaling.cpu }} }
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+{{- end }}
+{{- end }}

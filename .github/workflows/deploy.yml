@@ -1,0 +1,56 @@
+name: deploy
+
+# Manual, approved deploys with Helm. Configure in GitHub:
+#   - Environments "staging" and "production" with required reviewers.
+#   - Environment secret KUBECONFIG_B64 (base64 kubeconfig for a deploy-only service account).
+#   - Environment variable VALUES_FILE (e.g. infra/helm/values-production.yaml, kept out of git if it
+#     holds anything sensitive; secrets themselves come from your secret manager via External Secrets).
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        required: true
+      version:
+        description: Image tag to deploy (e.g. 0.4.0) — every image must already be released
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.2
+      - name: Kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+      - name: Diff-free dry run first
+        run: |
+          helm upgrade --install willspot infra/helm/willspot --namespace willspot \
+            -f "${{ vars.VALUES_FILE }}" --set image.tag="${{ inputs.version }}" \
+            --set image.registry="ghcr.io/${{ github.repository_owner }}" --dry-run=server > /dev/null
+      - name: Deploy (migrations run first; rolls back automatically if anything fails)
+        run: |
+          helm upgrade --install willspot infra/helm/willspot --namespace willspot \
+            -f "${{ vars.VALUES_FILE }}" --set image.tag="${{ inputs.version }}" \
+            --set image.registry="ghcr.io/${{ github.repository_owner }}" \
+            --rollback-on-failure --wait --timeout 15m
+      - name: Smoke check through the public gateway
+        run: |
+          host=$(helm get values willspot -n willspot -a -o json | python3 -c "import json,sys;print(json.load(sys.stdin)['ingress']['api']['host'])")
+          for i in $(seq 1 20); do curl -sf "https://$host/readyz" && exit 0; sleep 6; done
+          echo "gateway not ready after deploy"; exit 1

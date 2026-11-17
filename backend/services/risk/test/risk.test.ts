@@ -19,7 +19,7 @@ const H = { "x-service-name": "wallet", "x-service-token": "wallet-token-123456"
 beforeAll(async () => {
   const keys = await testKeys();
   issuer = keys.issuer;
-  adminT = await issuer.signAccess({ id: randomUUID(), role: "admin", tier: 2, sid: "s" });
+  adminT = await issuer.signAccess({ id: randomUUID(), role: "admin", roles: ["super_admin"], tier: 2, sid: "s" });
   const mk = async (p: string) => {
     const t = await createTestDatabase(p);
     const db = createPool(t.url);

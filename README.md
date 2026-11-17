@@ -6,17 +6,17 @@ A Naira wallet for Nigeria: an account number for bank deposits, withdrawals to 
 
 ```
 brand/        brand.json + placeholder logo (seed for everything below)
-backend/      gateway · identity · wallet · trade · config · giftcards · bills · risk  (Fastify + TypeScript, Postgres per service)
+backend/      gateway · identity · wallet · trade · config · giftcards · bills · risk · notifications  (Fastify + TypeScript, Postgres per service, NATS events)
 mobile/       Flutter app (Android + iOS)
 web/site      marketing website (Next.js static export, motion animations)
 web/admin     admin dashboard (Next.js, httpOnly-cookie BFF)
-infra/        docker-compose + Postgres init
+infra/        docker-compose (+ observability profile) · Helm chart · backups · Prometheus/Grafana/OTel config
 docs/         analysis, ADRs, plan, security, branding, changelog
 ```
 
 ## Run it locally (no Docker needed)
 
-Needs Node 24+, Postgres 15+ binaries (`brew install postgresql@15`), Flutter 3.47+.
+Needs Node 24+, Postgres 15+ binaries (`brew install postgresql@15`), Flutter 3.47+. Optional: `nats-server` (`brew install nats-server`) — `npm run dev` starts it automatically so push/inbox notifications flow; without it events wait in each service's outbox.
 
 ```bash
 cd backend && npm install && npm run db:test:start
@@ -72,6 +72,39 @@ cd mobile && flutter analyze && flutter test
 cd web && npm run typecheck && npm run build
 ```
 
+Production deployment, secrets, observability, backups and push setup: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## Verification (2026-11-17, phase 4)
+- **Backend:** typecheck clean; **144 tests pass** (was 114). New tests cover:
+  - trace propagation and the fresh trace at the edge; metrics by route template; readiness while draining; `*_FILE` secrets;
+  - roles and permissions; outbox ordering and retry; the single-replica job lock;
+  - **real NATS JetStream** (durable consumer, dedupe, redelivery);
+  - the notifications service; FCM against a fake Google OAuth/FCM server;
+  - staff invites, role changes and the last-super-admin guard; recovery codes; support 2FA reset; new-device events;
+  - outbox triggers in every money service.
+- **Smoke test: 50 checks, all pass** against the live stack with NATS. Phase 4 adds:
+  - deposit, trade, withdrawal, bill and gift-card events reaching the inbox;
+  - a support-role admin refused rates, staff management and ops;
+  - metrics exported, and `/metrics` not public.
+- **Traces:** 594 spans exported to a fake OTLP collector. One crypto buy is a single trace: gateway → trade → identity, risk, wallet.
+- **Graceful shutdown:** SIGTERM → `/readyz` 503 for 5 s while `/healthz` stays 200 → exit 0.
+- **Durability:** a deposit made while the notifications service was stopped reached the inbox after restart.
+- **Backups:** age-encrypted backup of 8 databases, then a restore drill: ledger nets to zero, journals balance. A tampered file fails the drill; a backup without a key is refused.
+- **Helm:** `helm lint` passes; 83 rendered objects pass `kubeconform` (Kubernetes 1.31 + CRD schemas). Compose validates with and without the observability profile.
+- **Mobile:** analyze clean, **27 tests pass**; Android APK and iOS simulator builds pass with Firebase. On the Android emulator against the live stack:
+  - bell badge and inbox;
+  - 2FA turned on (QR, computed code, recovery codes) and the security notice arrived;
+  - sign-in asked for the code, and a recovery code worked.
+- **Admin:** typecheck and build pass. In the browser: the setup link sets a password; the Staff & roles page; a support role sees only its pages; Operations shows notification health.
+- **Bugs found and fixed while verifying:**
+  - the gift-card buy trigger missed orders that are inserted as failed and then completed;
+  - setup-link and audit-insert parameter bugs; the placeholder phone for the seeded admin;
+  - a first-install Helm hook ordering problem;
+  - observability services nested under the wrong compose key;
+  - text controllers disposed during dialog animations; the setup page losing its token in React strict mode;
+  - the bell's screen-reader label; a phase 1 pg deprecation (parallel queries on one transaction client).
+- **Not verified:** a real Kubernetes install, Docker images, S3 upload, real FCM/APNs delivery, Redis rate limits.
+
 ## Verification (2026-11-17, phase 3)
 | Check | Result |
 |---|---|
@@ -117,7 +150,9 @@ Provider choices and how to switch them on: [docs/PROVIDERS.md](docs/PROVIDERS.m
 **Not verified:** Docker image builds and compose stack (Docker daemon not running), GitHub Actions (no remote yet; YAML syntax checked only), iOS flows beyond the first screen, release-signed builds, any real provider.
 
 ## Screenshots
+Phase 4: [inbox](docs/screenshots/mobile-inbox.png) · [home badge](docs/screenshots/mobile-home-badge.png) · [2FA QR](docs/screenshots/mobile-2fa-qr.png) · [recovery codes](docs/screenshots/mobile-2fa-recovery.png) · [security notice](docs/screenshots/mobile-inbox-security.png) · [2FA sign-in](docs/screenshots/mobile-login-2fa.png) · admin [staff & roles](docs/screenshots/admin-staff-roles.jpg) · [support role](docs/screenshots/admin-support-role.jpg) · [operations](docs/screenshots/admin-ops-phase4.jpg)
+
 Android emulator, live sandbox backend: [onboarding](docs/screenshots/android-onboarding.png) · [home](docs/screenshots/android-home.png) · [convert](docs/screenshots/android-convert.png) · [gift cards](docs/screenshots/android-giftcards.png) · [bills](docs/screenshots/android-bills.png) · [markets](docs/screenshots/android-markets.png) · iOS simulator: [onboarding](docs/screenshots/ios-onboarding.png)
 
 ## Docs
-[Analysis of Bennybit](docs/BENNYBIT_ANALYSIS.md) · [Providers](docs/PROVIDERS.md) · [Decisions](docs/DECISIONS.md) · [Phase plan](docs/PLAN.md) · [Security](docs/SECURITY.md) · [Branding](docs/BRANDING.md) · [Changelog](docs/CHANGELOG.md)
+[Analysis of Bennybit](docs/BENNYBIT_ANALYSIS.md) · [Providers](docs/PROVIDERS.md) · [Decisions](docs/DECISIONS.md) · [Phase plan](docs/PLAN.md) · [Security](docs/SECURITY.md) · [Deployment & runbooks](docs/DEPLOYMENT.md) · [Branding](docs/BRANDING.md) · [Changelog](docs/CHANGELOG.md)

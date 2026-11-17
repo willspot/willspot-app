@@ -14,10 +14,10 @@ import {
   currentUser,
   forbidden,
   fromMinor,
-  migrate,
+  migrateOnStart,
   notFound,
   parse,
-  requireAdmin,
+  requirePermission, type Permission,
   toMinor,
   tx,
   type Db,
@@ -57,8 +57,8 @@ const view = (p: Record<string, unknown>) => ({
 
 export async function buildBills(deps: BillsDeps) {
   const { db, provider } = deps;
-  await migrate(db, MIGRATIONS);
-  const app = await createApp("bills", { logger: deps.logger });
+  await migrateOnStart(db, MIGRATIONS);
+  const app = await createApp("bills", { logger: deps.logger, ready: () => db.query("SELECT 1") });
   const auth = authenticate(deps.verifier);
 
   const catalogue = async () => (provider.catalogue ? provider.catalogue() : BILLERS);
@@ -182,21 +182,22 @@ export async function buildBills(deps: BillsDeps) {
     return view(failed.rows[0]);
   });
 
-  app.get("/v1/admin/bills/health", { preHandler: [auth, requireAdmin] }, async () => {
+  const perm = (p: Permission) => ({ preHandler: [auth, requirePermission(p)] });
+  app.get("/v1/admin/bills/health", perm("ops.read"), async () => {
     const r = await db.query<{ n: string; oldest: Date | null }>("SELECT count(*) AS n, min(created_at) AS oldest FROM payments WHERE status='processing'");
     const oldest = r.rows[0]!.oldest;
     return { processing: Number(r.rows[0]!.n), oldestProcessingMinutes: oldest ? Math.round((Date.now() - oldest.getTime()) / 60_000) : 0 };
   });
 
   /** Admin: run the requery job now (it also runs on a timer in production). */
-  app.post("/v1/admin/bills/requery", { preHandler: [auth, requireAdmin] }, async () => ({ settled: await requeryPending(db, provider, deps.ledger) }));
+  app.post("/v1/admin/bills/requery", perm("money.manage"), async () => ({ settled: await requeryPending(db, provider, deps.ledger) }));
 
   app.get("/v1/bills/payments", { preHandler: auth }, async (req) => {
     const r = await db.query("SELECT * FROM payments WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50", [currentUser(req).id]);
     return { items: r.rows.map(view) };
   });
 
-  app.get("/v1/admin/bills/payments", { preHandler: [auth, requireAdmin] }, async () => {
+  app.get("/v1/admin/bills/payments", perm("money.read"), async () => {
     const r = await db.query("SELECT * FROM payments ORDER BY created_at DESC LIMIT 100");
     const t = await db.query<{ status: string; n: string; total: string }>("SELECT status, count(*) AS n, coalesce(sum(amount),0)::text AS total FROM payments GROUP BY status");
     return { items: r.rows.map((p) => ({ ...view(p), userId: p.user_id })), totals: t.rows.map((x) => ({ status: x.status, count: Number(x.n), total: fromMinor(BigInt(x.total), "NGN") })) };

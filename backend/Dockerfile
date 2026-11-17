@@ -14,6 +14,7 @@ COPY backend/services/config/package.json services/config/
 COPY backend/services/giftcards/package.json services/giftcards/
 COPY backend/services/bills/package.json services/bills/
 COPY backend/services/risk/package.json services/risk/
+COPY backend/services/notifications/package.json services/notifications/
 RUN npm ci --no-audit --no-fund
 COPY backend/ ./
 ARG SERVICE
@@ -28,7 +29,8 @@ WORKDIR /app
 COPY --from=build --chown=node:node /src/dist/${SERVICE}/ ./
 COPY --chown=node:node brand/brand.json ./brand/brand.json
 USER node
-EXPOSE 8080 4001 4002 4003 4004 4005 4006 4007
+# 9464 = Prometheus metrics (never routed publicly)
+EXPOSE 8080 4001 4002 4003 4004 4005 4006 4007 4008 9464
 HEALTHCHECK --interval=15s --timeout=3s --retries=3 \
   CMD wget -qO- "http://127.0.0.1:${PORT:-8080}/healthz" >/dev/null || exit 1
 CMD ["node", "--enable-source-maps", "bin/server.mjs"]

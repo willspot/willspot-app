@@ -18,12 +18,12 @@ import {
   hmacSign,
   hmacVerify,
   isAsset,
-  migrate,
+  migrateOnStart,
   notFound,
   nubanSchema,
   parse,
   randomToken,
-  requireAdmin,
+  requirePermission, type Permission,
   requireService,
   toMinor,
   tx,
@@ -76,8 +76,8 @@ const WALLET_ASSETS: Asset[] = ["NGN", "USD", "BTC", "ETH", "USDT"];
 
 export async function buildWallet(deps: WalletDeps) {
   const { db, verifier, bank } = deps;
-  await migrate(db, MIGRATIONS);
-  const app = await createApp("wallet", { logger: deps.logger });
+  await migrateOnStart(db, MIGRATIONS);
+  const app = await createApp("wallet", { logger: deps.logger, ready: () => db.query("SELECT 1") });
   trackWebhookFailures(app, db);
   const auth = authenticate(verifier);
   const fee = deps.withdrawFeeMinor ?? 50_00n;
@@ -448,9 +448,9 @@ export async function buildWallet(deps: WalletDeps) {
 
   // ---------- Admin ----------
 
-  const admin = { preHandler: [auth, requireAdmin] };
+  const perm = (p: Permission) => ({ preHandler: [auth, requirePermission(p)] });
 
-  app.get("/v1/admin/wallet/summary", admin, async () => {
+  app.get("/v1/admin/wallet/summary", perm("money.read"), async () => {
     const r = await db.query<{ asset: Asset; kind: string; code: string; total: string }>(
       `SELECT a.asset, CASE WHEN a.code LIKE 'user:%' THEN 'users' ELSE a.code END AS code,
               CASE WHEN a.code LIKE 'user:%' THEN 'user' ELSE 'system' END AS kind, sum(b.balance)::text AS total
@@ -467,7 +467,7 @@ export async function buildWallet(deps: WalletDeps) {
     };
   });
 
-  app.get("/v1/admin/wallet/journals", admin, async (req) => {
+  app.get("/v1/admin/wallet/journals", perm("money.read"), async (req) => {
     const q = parse(z.object({ limit: z.coerce.number().int().min(1).max(200).default(50), userId: uuidSchema.optional() }), req.query);
     const rows = await db.query(
       `SELECT j.id, j.type, j.user_id, j.description, j.created_at,
@@ -485,13 +485,13 @@ export async function buildWallet(deps: WalletDeps) {
     };
   });
 
-  app.get("/v1/admin/wallet/withdrawals", admin, async (req) => {
+  app.get("/v1/admin/wallet/withdrawals", perm("money.read"), async (req) => {
     const { status } = parse(z.object({ status: z.enum(["processing", "completed", "failed"]).optional() }), req.query);
     const r = await db.query(`${withdrawalSelect.replace("SELECT id", "SELECT id, user_id")} WHERE ($1::text IS NULL OR status=$1) ORDER BY created_at DESC LIMIT 100`, [status ?? null]);
     return { items: r.rows.map(withdrawalView) };
   });
 
-  app.get("/v1/admin/wallet/users/:id", admin, async (req) => {
+  app.get("/v1/admin/wallet/users/:id", perm("money.read"), async (req) => {
     const { id } = parse(z.object({ id: uuidSchema }), req.params);
     const b = await balancesFor(db, id);
     return {

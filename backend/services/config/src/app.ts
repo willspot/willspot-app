@@ -9,9 +9,9 @@ import {
   createApp,
   currentUser,
   flagsSchema,
-  migrate,
+  migrateOnStart,
   parse,
-  requireAdmin,
+  requirePermission, type Permission,
   requireService,
   tx,
   type Db,
@@ -31,7 +31,7 @@ export const DEFAULT_SEED = fileURLToPath(new URL("../../../../brand/brand.json"
 
 export async function buildConfig(deps: ConfigDeps) {
   const { db } = deps;
-  await migrate(db, MIGRATIONS);
+  await migrateOnStart(db, MIGRATIONS);
   const seed = JSON.parse(await readFile(deps.seedFile, "utf8")) as Record<string, unknown>;
   const { flags: seedFlags, ...seedBrand } = seed;
   await db.query("INSERT INTO config_docs(key, value) VALUES ('brand', $1), ('flags', $2) ON CONFLICT DO NOTHING", [
@@ -39,7 +39,7 @@ export async function buildConfig(deps: ConfigDeps) {
     parse(flagsSchema, seedFlags),
   ]);
 
-  const app = await createApp("config", { logger: deps.logger });
+  const app = await createApp("config", { logger: deps.logger, ready: () => db.query("SELECT 1") });
   const auth = authenticate(deps.verifier);
 
   const load = async () => {
@@ -57,7 +57,7 @@ export async function buildConfig(deps: ConfigDeps) {
     return c;
   });
 
-  const admin = { preHandler: [auth, requireAdmin] };
+  const perm = (p: Permission) => ({ preHandler: [auth, requirePermission(p)] });
 
   async function save(key: "brand" | "flags", value: object, actor: string) {
     return tx(db, async (c) => {
@@ -68,17 +68,17 @@ export async function buildConfig(deps: ConfigDeps) {
     });
   }
 
-  app.post("/v1/admin/config/brand", admin, async (req) => {
+  app.post("/v1/admin/config/brand", perm("config.manage"), async (req) => {
     const brand = parse(brandSchema, (req.body as { brand?: unknown })?.brand);
     return { version: await save("brand", brand, currentUser(req).id), brand };
   });
 
-  app.post("/v1/admin/config/flags", admin, async (req) => {
+  app.post("/v1/admin/config/flags", perm("config.manage"), async (req) => {
     const flags = parse(flagsSchema, (req.body as { flags?: unknown })?.flags);
     return { version: await save("flags", flags, currentUser(req).id), flags };
   });
 
-  app.get("/v1/admin/config/history", admin, async (req) => {
+  app.get("/v1/admin/config/history", perm("config.manage"), async (req) => {
     const { key } = parse(z.object({ key: z.enum(["brand", "flags"]) }), req.query);
     const r = await db.query("SELECT version, value, updated_by, at FROM config_history WHERE key=$1 ORDER BY id DESC LIMIT 50", [key]);
     return { items: r.rows };

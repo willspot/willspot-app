@@ -16,10 +16,10 @@ import {
   currentUser,
   forbidden,
   fromMinor,
-  migrate,
+  migrateOnStart,
   notFound,
   parse,
-  requireAdmin,
+  requirePermission, type Permission,
   sha256,
   tx,
   uuidSchema,
@@ -88,9 +88,9 @@ const sellView = (t: Record<string, unknown>) => ({
 
 export async function buildGiftcards(deps: GiftcardDeps) {
   const { db, cipher } = deps;
-  await migrate(db, MIGRATIONS);
+  await migrateOnStart(db, MIGRATIONS);
   // Photos arrive as base64 inside JSON, so this service accepts larger bodies.
-  const app = await createApp("giftcards", { logger: deps.logger, bodyLimit: 2_500_000 });
+  const app = await createApp("giftcards", { logger: deps.logger, ready: () => db.query("SELECT 1"), bodyLimit: 2_500_000 });
   const auth = authenticate(deps.verifier);
   const maxPerDay = deps.maxSellsPerDay ?? 5;
 
@@ -232,9 +232,9 @@ export async function buildGiftcards(deps: GiftcardDeps) {
 
   // ---------- Admin review ----------
 
-  const admin = { preHandler: [auth, requireAdmin] };
+  const perm = (p: Permission) => ({ preHandler: [auth, requirePermission(p)] });
 
-  app.get("/v1/admin/giftcards/queue", admin, async (req) => {
+  app.get("/v1/admin/giftcards/queue", perm("giftcards.review"), async (req) => {
     const { status } = parse(z.object({ status: z.enum(["pending", "approved", "rejected"]).default("pending") }), req.query);
     const r = await db.query(
       `SELECT t.id, t.user_id, t.brand_id, b.name AS brand_name, t.value, t.currency, t.code_last4, t.image IS NOT NULL AS has_image, t.rate, t.payout, t.status, t.reason, t.created_at, t.reviewed_at
@@ -245,7 +245,7 @@ export async function buildGiftcards(deps: GiftcardDeps) {
   });
 
   /** Full card details for the reviewer. Every view is audited. */
-  app.get("/v1/admin/giftcards/trades/:id", admin, async (req) => {
+  app.get("/v1/admin/giftcards/trades/:id", perm("giftcards.review"), async (req) => {
     const { id } = parse(z.object({ id: uuidSchema }), req.params);
     const t = (await db.query("SELECT t.*, b.name AS brand_name FROM sell_trades t JOIN brands b ON b.id=t.brand_id WHERE t.id=$1", [id])).rows[0];
     if (!t) throw notFound();
@@ -259,7 +259,7 @@ export async function buildGiftcards(deps: GiftcardDeps) {
     };
   });
 
-  app.post("/v1/admin/giftcards/trades/:id/decision", admin, async (req) => {
+  app.post("/v1/admin/giftcards/trades/:id/decision", perm("giftcards.review"), async (req) => {
     const { id } = parse(z.object({ id: uuidSchema }), req.params);
     const b = parse(
       z.object({ decision: z.enum(["approved", "rejected"]), reason: z.string().max(300).optional(), confirmedValue: z.number().int().positive().optional() }),
@@ -303,9 +303,9 @@ export async function buildGiftcards(deps: GiftcardDeps) {
   });
 
   /** All brands, regardless of the customer-facing flag. */
-  app.get("/v1/admin/giftcards/brands", admin, async () => ({ items: (await db.query("SELECT * FROM brands ORDER BY name")).rows.map(brandView) }));
+  app.get("/v1/admin/giftcards/brands", perm("money.read"), async () => ({ items: (await db.query("SELECT * FROM brands ORDER BY name")).rows.map(brandView) }));
 
-  app.post("/v1/admin/giftcards/brands/:id", admin, async (req) => {
+  app.post("/v1/admin/giftcards/brands/:id", perm("money.manage"), async (req) => {
     const { id } = parse(z.object({ id: z.string().max(40) }), req.params);
     const b = parse(
       z.object({ sellRate: z.string().regex(/^\d{1,9}(\.\d{1,2})?$/), buyRate: z.string().regex(/^\d{1,9}(\.\d{1,2})?$/), minValue: z.number().int().positive(), maxValue: z.number().int().positive(), sellEnabled: z.boolean(), buyEnabled: z.boolean() }),

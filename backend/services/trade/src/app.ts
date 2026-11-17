@@ -15,10 +15,10 @@ import {
   currentUser,
   forbidden,
   fromMinor,
-  migrate,
+  migrateOnStart,
   notFound,
   parse,
-  requireAdmin,
+  requirePermission, type Permission,
   sha256,
   toMinor,
   tx,
@@ -69,8 +69,8 @@ const scale = (asset: Asset) => 10n ** BigInt(ASSETS[asset].decimals);
 
 export async function buildTrade(deps: TradeDeps) {
   const { db, verifier, market } = deps;
-  await migrate(db, MIGRATIONS);
-  const app = await createApp("trade", { logger: deps.logger });
+  await migrateOnStart(db, MIGRATIONS);
+  const app = await createApp("trade", { logger: deps.logger, ready: () => db.query("SELECT 1") });
   const auth = authenticate(verifier);
   const ttl = deps.quoteTtlSeconds ?? 30;
 
@@ -238,9 +238,9 @@ export async function buildTrade(deps: TradeDeps) {
 
   // ---------- Admin ----------
 
-  const admin = { preHandler: [auth, requireAdmin] };
+  const perm = (p: Permission) => ({ preHandler: [auth, requirePermission(p)] });
 
-  app.get("/v1/admin/trade/pairs", admin, async () => {
+  app.get("/v1/admin/trade/pairs", perm("money.read"), async () => {
     const usdNgn = fromMinor(await usdNgnKobo(), "NGN");
     const spread = (await db.query<{ value: string }>("SELECT value FROM settings WHERE key='usd_fx_spread_bps'")).rows[0]?.value ?? "100";
     return {
@@ -250,7 +250,7 @@ export async function buildTrade(deps: TradeDeps) {
     };
   });
 
-  app.post("/v1/admin/trade/pairs/:asset", admin, async (req) => {
+  app.post("/v1/admin/trade/pairs/:asset", perm("money.manage"), async (req) => {
     const { asset } = parse(z.object({ asset: z.enum(["BTC", "ETH", "USDT"]) }), req.params);
     const b = parse(
       z.object({ enabled: z.boolean(), buySpreadBps: z.number().int().min(0).max(2000), sellSpreadBps: z.number().int().min(0).max(2000), minNgn: amountSchema, maxNgn: amountSchema }),
@@ -264,7 +264,7 @@ export async function buildTrade(deps: TradeDeps) {
     return { ok: true };
   });
 
-  app.post("/v1/admin/trade/fx", admin, async (req) => {
+  app.post("/v1/admin/trade/fx", perm("money.manage"), async (req) => {
     const { usdNgn } = parse(z.object({ usdNgn: amountSchema }), req.body);
     if (toMinor(usdNgn, "NGN") <= 0n) throw badRequest("bad_rate", "Rate must be positive");
     await db.query("UPDATE settings SET value=$1, updated_at=now() WHERE key='usd_ngn'", [usdNgn]);
@@ -272,23 +272,23 @@ export async function buildTrade(deps: TradeDeps) {
     return { ok: true };
   });
 
-  app.post("/v1/admin/trade/fx-spread", admin, async (req) => {
+  app.post("/v1/admin/trade/fx-spread", perm("money.manage"), async (req) => {
     const { bps } = parse(z.object({ bps: z.number().int().min(0).max(2000) }), req.body);
     await db.query("UPDATE settings SET value=$1, updated_at=now() WHERE key='usd_fx_spread_bps'", [String(bps)]);
     await db.query("INSERT INTO audit_log(actor_id, action, target, meta) VALUES ($1,'fx_spread.updated','usd',$2)", [currentUser(req).id, { bps }]);
     return { ok: true };
   });
 
-  app.get("/v1/admin/trade/conversions", admin, async () => {
+  app.get("/v1/admin/trade/conversions", perm("money.read"), async () => {
     const r = await db.query("SELECT * FROM conversions ORDER BY created_at DESC LIMIT 100");
     return { items: r.rows.map((c) => ({ ...conversionView(c), userId: c.user_id })) };
   });
 
   registerConvert(app, deps, auth);
 
-  app.get("/v1/admin/trade/health", admin, async () => pendingHealth(db));
+  app.get("/v1/admin/trade/health", perm("ops.read"), async () => pendingHealth(db));
 
-  app.get("/v1/admin/trade/orders", admin, async () => {
+  app.get("/v1/admin/trade/orders", perm("money.read"), async () => {
     const r = await db.query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 100");
     const vol = await db.query<{ side: string; n: string; ngn: string }>("SELECT side, count(*) AS n, coalesce(sum(ngn_amount),0)::text AS ngn FROM orders WHERE status='completed' GROUP BY side");
     return {

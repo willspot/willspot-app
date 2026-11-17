@@ -175,7 +175,7 @@ describe("wallet service", () => {
   it("serves admin summaries only to admins", async () => {
     const u = await user(1);
     expect((await call("GET", "/v1/admin/wallet/summary", u.token)).statusCode).toBe(403);
-    const adminToken = await issuer.signAccess({ id: randomUUID(), role: "admin", tier: 2, sid: "s" });
+    const adminToken = await issuer.signAccess({ id: randomUUID(), role: "admin", roles: ["super_admin"], tier: 2, sid: "s" });
     const s = (await call("GET", "/v1/admin/wallet/summary", adminToken)).json();
     expect(s.deposits.count).toBeGreaterThan(0);
     const j = (await call("GET", "/v1/admin/wallet/journals?limit=5", adminToken)).json();
@@ -187,5 +187,12 @@ describe("wallet service", () => {
     await call("GET", "/v1/wallet/virtual-account", u.token);
     expect((await call("POST", "/v1/sandbox/deposits", u.token, { amount: "7500" })).statusCode).toBe(200);
     expect(await balance(u.token)).toBe("7500.00");
+  });
+
+  it("writes an outbox event for each completed money movement (ADR-021)", async () => {
+    const types = new Set<string>();
+    for (const d of [{ db }]) for (const r of (await d.db.query<{ type: string }>("SELECT type FROM outbox")).rows) types.add(r.type);
+    expect([...types]).toEqual(expect.arrayContaining(["wallet.deposit_received", "wallet.withdrawal_completed"]));
+    console.log("outbox types:", [...types].sort().join(", "));
   });
 });

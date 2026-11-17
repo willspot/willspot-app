@@ -1,6 +1,7 @@
 import type { FastifyRequest } from "fastify";
 import { AppError, unauthorized } from "./errors.js";
 import { safeEqual } from "./crypto.js";
+import { traceHeaders } from "./telemetry.js";
 
 /**
  * Service-to-service calls. Internal routes live under /internal and are never
@@ -31,6 +32,7 @@ export async function callInternal<T>(cfg: InternalCall, method: "GET" | "POST",
       "x-service-name": cfg.service,
       "x-service-token": cfg.token,
       ...(cfg.requestId ? { "x-request-id": cfg.requestId } : {}),
+      ...traceHeaders(),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(5000),

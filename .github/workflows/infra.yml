@@ -1,0 +1,56 @@
+name: infra
+
+# Checks the Helm chart, compose file and observability config on every change.
+on:
+  push:
+    branches: [main]
+    paths: ["infra/**", ".github/workflows/infra.yml", ".github/workflows/deploy.yml"]
+  pull_request:
+    paths: ["infra/**", ".github/workflows/infra.yml", ".github/workflows/deploy.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.2
+      - name: Install kubeconform
+        run: |
+          curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz | tar xz -C /tmp
+          sudo mv /tmp/kubeconform /usr/local/bin/
+      - name: Lint and validate (defaults and everything switched on)
+        working-directory: infra/helm/willspot
+        run: |
+          helm lint .
+          helm template ws . > /tmp/default.yaml
+          helm template ws . --set externalSecrets.enabled=true --set monitoring.serviceMonitor=true \
+            --set monitoring.prometheusRule=true --set backup.drill.enabled=true > /tmp/all.yaml
+          kubeconform -strict -summary -kubernetes-version 1.31.0 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            /tmp/default.yaml /tmp/all.yaml
+      - name: Alert rules in the chart match infra/observability
+        run: diff infra/observability/alerts/willspot.rules.yml infra/helm/willspot/files/willspot.rules.yml
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose file is valid (with and without the observability profile)
+        run: |
+          cp backend/.env.example backend/.env
+          docker compose -f infra/docker-compose.yml config -q
+          docker compose -f infra/docker-compose.yml --profile observability config -q
+      - name: Prometheus rules are valid
+        run: docker run --rm -v "$PWD/infra/observability:/o:ro" --entrypoint promtool prom/prometheus:v3.7.3 check rules /o/alerts/willspot.rules.yml
+
+  backup-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck infra/backup/*.sh

@@ -1,6 +1,7 @@
-import { callInternal, createPool, loadVerifier } from "@willspot/common";
-import { buildRisk } from "./app.js";
+import { callInternal, createPool, loadVerifier, loadSecretFiles, migrateOnlyAndExit, serve } from "@willspot/common";
+import { buildRisk, MIGRATIONS } from "./app.js";
 
+loadSecretFiles();
 const env = (k: string, d?: string) => {
   const v = process.env[k] ?? d;
   if (v === undefined) throw new Error(`Missing env ${k}`);
@@ -9,8 +10,11 @@ const env = (k: string, d?: string) => {
 
 const identity = { baseUrl: env("IDENTITY_INTERNAL_URL", "http://localhost:4001"), service: "risk", token: env("SERVICE_TOKEN_RISK") };
 
+const db = createPool(env("RISK_DATABASE_URL"));
+await migrateOnlyAndExit(db, MIGRATIONS, "risk");
+
 const app = await buildRisk({
-  db: createPool(env("RISK_DATABASE_URL")),
+  db,
   verifier: await loadVerifier(env("JWT_PUBLIC_KEY")),
   users: { get: (id) => callInternal(identity, "GET", `/internal/users/${id}`) },
   serviceTokens: {
@@ -21,4 +25,4 @@ const app = await buildRisk({
   },
 });
 
-await app.listen({ host: env("HOST", "0.0.0.0"), port: Number(env("PORT", "4007")) });
+await serve(app, { port: Number(env("PORT", "4007")) });

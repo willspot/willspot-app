@@ -7,33 +7,43 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import brand from "../brand.json";
 import { api } from "@/lib/api";
 
-const NAV = [
-  ["/", "Overview"],
-  ["/users", "Users"],
-  ["/kyc", "KYC review"],
-  ["/transactions", "Ledger"],
-  ["/withdrawals", "Withdrawals"],
-  ["/giftcards", "Gift cards"],
-  ["/bills", "Bill payments"],
-  ["/trade", "Rates & convert"],
-  ["/branding", "Branding"],
-  ["/flags", "Feature flags"],
-  ["/risk", "Risk & AML"],
-  ["/ops", "Operations"],
-  ["/audit", "Audit log"],
-  ["/security", "Security (2FA)"],
-] as const;
+/** Each page and the permission it needs (null = every admin). Mirrors backend ROLE_PERMISSIONS. */
+const NAV: readonly (readonly [string, string, string | null])[] = [
+  ["/", "Overview", null],
+  ["/users", "Users", "users.read"],
+  ["/kyc", "KYC review", "kyc.review"],
+  ["/transactions", "Ledger", "money.read"],
+  ["/withdrawals", "Withdrawals", "money.read"],
+  ["/giftcards", "Gift cards", "giftcards.review"],
+  ["/bills", "Bill payments", "money.read"],
+  ["/trade", "Rates & convert", "money.read"],
+  ["/branding", "Branding", "config.manage"],
+  ["/flags", "Feature flags", "config.manage"],
+  ["/risk", "Risk & AML", "risk.manage"],
+  ["/ops", "Operations", "ops.read"],
+  ["/audit", "Audit log", "audit.read"],
+  ["/admins", "Staff & roles", "admins.manage"],
+  ["/security", "My security (2FA)", null],
+];
+
+export interface Me { id: string; email: string; adminRoles?: string[]; permissions?: string[] }
+const MeCtx = createContext<Me | null>(null);
+export const useMe = () => useContext(MeCtx);
+/** True when the signed-in admin's roles grant `perm`. The server enforces this too; this only hides controls. */
+export function useCan(perm: string) {
+  return !!useMe()?.permissions?.includes(perm);
+}
 
 const ToastCtx = createContext<(msg: string) => void>(() => {});
 export const useToast = () => useContext(ToastCtx);
 
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
-  const [me, setMe] = useState<{ email: string } | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    api<{ user: { email: string } }>("/api/auth/session")
+    api<{ user: Me }>("/api/auth/session")
       .then((r) => setMe(r.user))
       .catch(() => (location.href = "/login"));
   }, []);
@@ -47,6 +57,7 @@ export function Shell({ children }: { children: ReactNode }) {
   if (!me) return <div className="login-wrap muted">Checking your session…</div>;
 
   return (
+    <MeCtx.Provider value={me}>
     <ToastCtx.Provider value={setToast}>
       <div className="shell">
         <aside className="sidebar">
@@ -55,7 +66,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <img src="/brand/logo-mark.svg" alt="" width={30} height={30} />
             {brand.name} Admin
           </div>
-          {NAV.map(([href, label]) => {
+          {NAV.filter(([, , perm]) => !perm || me.permissions?.includes(perm)).map(([href, label]) => {
             const active = href === "/" ? path === "/" : path.startsWith(href);
             return (
               <Link key={href} href={href} className={`navlink ${active ? "active" : ""}`} style={{ isolation: "isolate" }}>
@@ -66,6 +77,7 @@ export function Shell({ children }: { children: ReactNode }) {
           })}
           <div style={{ marginTop: "auto", fontSize: 12, padding: 8 }}>
             <div style={{ wordBreak: "break-all" }}>{me.email}</div>
+            <div className="muted" style={{ marginTop: 2 }}>{(me.adminRoles ?? []).map((r) => r.replace("_", " ")).join(", ") || "no role"}</div>
             <button
               className="btn secondary"
               style={{ marginTop: 8, width: "100%", justifyContent: "center" }}
@@ -94,6 +106,7 @@ export function Shell({ children }: { children: ReactNode }) {
         )}
       </AnimatePresence>
     </ToastCtx.Provider>
+    </MeCtx.Provider>
   );
 }
 

@@ -1,0 +1,99 @@
+{{- if .Values.backup.enabled }}
+{{- $dbs := list }}
+{{- range $name, $svc := .Values.services }}{{ if $svc.database }}{{ $dbs = append $dbs $name }}{{ end }}{{ end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "willspot.fullname" . }}-backup
+  labels: {{- include "willspot.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.backup.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.backup.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 7200
+      template:
+        metadata:
+          labels:
+            {{- include "willspot.labels" . | nindent 12 }}
+            app.kubernetes.io/name: backup
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext: {{- include "willspot.podSecurityContext" . | nindent 12 }}
+          containers:
+            - name: backup
+              image: {{ include "willspot.image" (dict "root" . "name" "backup" "image" .Values.backup.image) }}
+              command: ["/usr/local/bin/backup.sh"]
+              env:
+                - { name: BACKUP_DATABASES, value: {{ join " " $dbs | quote }} }
+                - { name: BACKUP_AGE_RECIPIENTS, value: /secrets/{{ .Values.backup.ageRecipientsKey }} }
+                - { name: HOME, value: /tmp }
+              envFrom:
+                - secretRef: { name: {{ include "willspot.fullname" . }}-backup }
+              resources:
+                requests: { cpu: 100m, memory: 256Mi }
+                limits: { memory: 1Gi }
+              securityContext: {{- include "willspot.containerSecurityContext" . | nindent 16 }}
+              volumeMounts:
+                - { name: tmp, mountPath: /tmp }
+                - { name: recipients, mountPath: /secrets, readOnly: true }
+          volumes:
+            - name: tmp
+              emptyDir: { sizeLimit: 20Gi }
+            - name: recipients
+              secret:
+                secretName: {{ include "willspot.fullname" . }}-backup
+                items: [{ key: {{ .Values.backup.ageRecipientsKey }}, path: {{ .Values.backup.ageRecipientsKey }} }]
+{{- if .Values.backup.drill.enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "willspot.fullname" . }}-restore-drill
+  labels: {{- include "willspot.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.drill.schedule | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            {{- include "willspot.labels" . | nindent 12 }}
+            app.kubernetes.io/name: restore-drill
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext: {{- include "willspot.podSecurityContext" . | nindent 12 }}
+          containers:
+            - name: drill
+              image: {{ include "willspot.image" (dict "root" . "name" "backup" "image" .Values.backup.image) }}
+              command: ["/usr/local/bin/restore-drill.sh"]
+              env:
+                - { name: BACKUP_AGE_IDENTITY, value: /secrets/age-identity.txt }
+                - { name: HOME, value: /tmp }
+              envFrom:
+                - secretRef: { name: {{ include "willspot.fullname" . }}-backup-drill }
+              resources:
+                requests: { cpu: 100m, memory: 256Mi }
+                limits: { memory: 1Gi }
+              securityContext: {{- include "willspot.containerSecurityContext" . | nindent 16 }}
+              volumeMounts:
+                - { name: tmp, mountPath: /tmp }
+                - { name: identity, mountPath: /secrets, readOnly: true }
+          volumes:
+            - name: tmp
+              emptyDir: { sizeLimit: 20Gi }
+            - name: identity
+              secret:
+                secretName: {{ include "willspot.fullname" . }}-backup-drill
+                items: [{ key: age-identity.txt, path: age-identity.txt }]
+{{- end }}
+{{- end }}
