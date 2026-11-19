@@ -1,0 +1,309 @@
+{
+  "@@locale": "en",
+  "languageName": "English",
+  "@languageName": {
+    "description": "This language's name, in itself"
+  },
+  "navHome": "Home",
+  "@navHome": {
+    "description": "Bottom tab"
+  },
+  "navTrade": "Trade",
+  "@navTrade": {
+    "description": "Bottom tab"
+  },
+  "navHistory": "History",
+  "@navHistory": {
+    "description": "Bottom tab: list of transactions"
+  },
+  "navProfile": "Profile",
+  "@navProfile": {
+    "description": "Bottom tab: the user's account and settings"
+  },
+  "homeGreeting": "Hi {name} 👋",
+  "@homeGreeting": {
+    "description": "Home header",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "notifications": "Notifications",
+  "@notifications": {
+    "description": "Bell button and settings row"
+  },
+  "notificationsUnread": "Notifications, {count} unread",
+  "@notificationsUnread": {
+    "description": "Screen-reader label of the bell",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "bannerSetPin": "Set your transaction PIN to start moving money.",
+  "@bannerSetPin": {
+    "description": "Prompt before first payment"
+  },
+  "bannerVerify": "Verify your BVN to add money and trade.",
+  "@bannerVerify": {
+    "description": "Prompt to complete BVN check"
+  },
+  "ctaSetPin": "Set PIN",
+  "@ctaSetPin": {
+    "description": "Button"
+  },
+  "ctaVerify": "Verify",
+  "@ctaVerify": {
+    "description": "Button"
+  },
+  "nairaBalance": "Naira balance",
+  "@nairaBalance": {
+    "description": "Balance card heading"
+  },
+  "showBalance": "Show balance",
+  "@showBalance": {
+    "description": "Eye button"
+  },
+  "hideBalance": "Hide balance",
+  "@hideBalance": {
+    "description": "Eye button"
+  },
+  "actionAddMoney": "Add money",
+  "@actionAddMoney": {
+    "description": "Quick action"
+  },
+  "actionWithdraw": "Withdraw",
+  "@actionWithdraw": {
+    "description": "Quick action: send money to a bank"
+  },
+  "actionConvert": "Convert",
+  "@actionConvert": {
+    "description": "Quick action: swap currencies"
+  },
+  "actionBuyCrypto": "Buy crypto",
+  "@actionBuyCrypto": {
+    "description": "Quick action"
+  },
+  "moreServices": "More services",
+  "@moreServices": {
+    "description": "Section heading"
+  },
+  "giftCards": "Gift cards",
+  "@giftCards": {
+    "description": "Service"
+  },
+  "usdAccount": "USD account",
+  "@usdAccount": {
+    "description": "Service: a US-dollar account"
+  },
+  "payBills": "Pay bills",
+  "@payBills": {
+    "description": "Service: airtime, data, power, TV"
+  },
+  "comingSoon": "Coming soon",
+  "@comingSoon": {
+    "description": "Badge on unavailable services"
+  },
+  "recentActivity": "Recent activity",
+  "@recentActivity": {
+    "description": "Section heading"
+  },
+  "seeAll": "See all",
+  "@seeAll": {
+    "description": "Link"
+  },
+  "walletLoadFailed": "Couldn't load your wallet",
+  "@walletLoadFailed": {
+    "description": "Error state"
+  },
+  "noActivityTitle": "No activity yet",
+  "@noActivityTitle": {
+    "description": "Empty state"
+  },
+  "noActivityMessage": "Add money to get started.",
+  "@noActivityMessage": {
+    "description": "Empty state"
+  },
+  "offlineTitle": "You're offline",
+  "@offlineTitle": {
+    "description": "No connection"
+  },
+  "offlineMessage": "Check your data or Wi-Fi, then try again.",
+  "@offlineMessage": {
+    "description": "No connection"
+  },
+  "offlineBanner": "You're offline. Showing what we last loaded.",
+  "@offlineBanner": {
+    "description": "Strip shown over stale content"
+  },
+  "retry": "Try again",
+  "@retry": {
+    "description": "Button"
+  },
+  "loginWelcome": "Welcome back",
+  "@loginWelcome": {
+    "description": "Login title"
+  },
+  "loginTo": "Log in to {brand}",
+  "@loginTo": {
+    "description": "Login subtitle",
+    "placeholders": {
+      "brand": {
+        "type": "String"
+      }
+    }
+  },
+  "email": "Email",
+  "@email": {
+    "description": "Field"
+  },
+  "password": "Password",
+  "@password": {
+    "description": "Field"
+  },
+  "showPassword": "Show password",
+  "@showPassword": {
+    "description": "Eye button"
+  },
+  "enterPassword": "Enter your password",
+  "@enterPassword": {
+    "description": "Validation"
+  },
+  "forgotPassword": "Forgot password?",
+  "@forgotPassword": {
+    "description": "Link"
+  },
+  "logIn": "Log in",
+  "@logIn": {
+    "description": "Button"
+  },
+  "newHere": "New here? Create an account",
+  "@newHere": {
+    "description": "Link to sign-up"
+  },
+  "lockWelcomeName": "Welcome back, {name}",
+  "@lockWelcomeName": {
+    "description": "App lock title",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "lockEnterPin": "Enter your PIN to continue",
+  "@lockEnterPin": {
+    "description": "App lock"
+  },
+  "lockNotYou": "Not you? Sign out",
+  "@lockNotYou": {
+    "description": "App lock sign-out link"
+  },
+  "verification": "Verification",
+  "@verification": {
+    "description": "Profile row: KYC"
+  },
+  "kycTier": "Tier {tier} of 2",
+  "@kycTier": {
+    "description": "Profile row subtitle",
+    "placeholders": {
+      "tier": {
+        "type": "String"
+      }
+    }
+  },
+  "changePin": "Change PIN",
+  "@changePin": {
+    "description": "Profile row"
+  },
+  "setPin": "Set transaction PIN",
+  "@setPin": {
+    "description": "Profile row"
+  },
+  "twoFactor": "Two-factor sign-in",
+  "@twoFactor": {
+    "description": "Profile row"
+  },
+  "stateOn": "On",
+  "@stateOn": {
+    "description": "Setting state"
+  },
+  "stateOffRecommended": "Off — recommended",
+  "@stateOffRecommended": {
+    "description": "Setting state"
+  },
+  "changePassword": "Change password",
+  "@changePassword": {
+    "description": "Profile row"
+  },
+  "signedInDevices": "Signed-in devices",
+  "@signedInDevices": {
+    "description": "Profile row"
+  },
+  "phone": "Phone",
+  "@phone": {
+    "description": "Profile row"
+  },
+  "statements": "Statements",
+  "@statements": {
+    "description": "Profile row"
+  },
+  "statementsSubtitle": "Monthly, from your ledger",
+  "@statementsSubtitle": {
+    "description": "Profile row subtitle"
+  },
+  "inviteFriends": "Invite friends",
+  "@inviteFriends": {
+    "description": "Profile row"
+  },
+  "yourCode": "Your code: {code}",
+  "@yourCode": {
+    "description": "Referral code",
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "appearance": "Appearance",
+  "@appearance": {
+    "description": "Settings heading: theme"
+  },
+  "themeSystem": "System",
+  "@themeSystem": {
+    "description": "Follow the phone's setting"
+  },
+  "themeLight": "Light",
+  "@themeLight": {
+    "description": "Theme"
+  },
+  "themeDark": "Dark",
+  "@themeDark": {
+    "description": "Theme"
+  },
+  "language": "Language",
+  "@language": {
+    "description": "Settings heading"
+  },
+  "translationDraft": "Some screens are still in English.",
+  "@translationDraft": {
+    "description": "Shown when a draft translation is in use"
+  },
+  "helpSupport": "Help & support",
+  "@helpSupport": {
+    "description": "Profile row"
+  },
+  "chatWithTeam": "Chat with our team",
+  "@chatWithTeam": {
+    "description": "Profile row subtitle"
+  },
+  "logOut": "Log out",
+  "@logOut": {
+    "description": "Profile row"
+  },
+  "closeAccount": "Close account",
+  "@closeAccount": {
+    "description": "Profile row"
+  }
+}

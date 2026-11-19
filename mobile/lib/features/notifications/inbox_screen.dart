@@ -123,11 +123,7 @@ class _InboxScreenState extends State<InboxScreen> {
             : ListView(
                 children: [
                   if (_error != null)
-                    const EmptyState(
-                      icon: Icons.cloud_off_rounded,
-                      title: "Couldn't load notifications",
-                      message: 'Pull down to try again.',
-                    ),
+                    ErrorState(error: _error!, title: "Couldn't load notifications", onRetry: _load),
                   if (_error == null && _items.isEmpty)
                     const EmptyState(
                       icon: Icons.notifications_none_rounded,

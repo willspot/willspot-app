@@ -25,6 +25,7 @@ class _DepositScreenState extends State<DepositScreen> {
   }
 
   Future<void> _load() async {
+    if (_error != null) setState(() => _error = null);
     try {
       final r = await AppScope.read(context).api.get('/v1/wallet/virtual-account');
       if (mounted) setState(() => _va = r);
@@ -56,7 +57,7 @@ class _DepositScreenState extends State<DepositScreen> {
         FilledButton(onPressed: () => Navigator.pushReplacement(context, fadeRoute(const KycScreen())), child: const Text('Verify BVN')),
       ]);
     } else if (_error != null) {
-      body = EmptyState(icon: Icons.cloud_off_rounded, title: "Couldn't open your account", message: _error!.message);
+      body = ErrorState(error: _error!, title: "Couldn't open your account", onRetry: _load);
     } else if (_va == null) {
       body = const Padding(padding: EdgeInsets.all(48), child: Center(child: CircularProgressIndicator()));
     } else {

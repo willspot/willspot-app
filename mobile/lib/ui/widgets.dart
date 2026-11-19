@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/api.dart';
+import '../core/l10n.dart';
 import '../core/money.dart';
 import 'motion.dart';
 
@@ -306,10 +307,12 @@ class PinPadState extends State<PinPad> with SingleTickerProviderStateMixin {
 }
 
 class EmptyState extends StatelessWidget {
-  const EmptyState({super.key, required this.icon, required this.title, this.message});
+  const EmptyState({super.key, required this.icon, required this.title, this.message, this.action});
   final IconData icon;
   final String title;
   final String? message;
+  /// Optional next step under the message, e.g. a retry button.
+  final Widget? action;
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -326,7 +329,31 @@ class EmptyState extends StatelessWidget {
         const SizedBox(height: 16),
         Text(title, style: Theme.of(context).textTheme.titleMedium, textAlign: TextAlign.center),
         if (message != null) ...[const SizedBox(height: 6), Text(message!, style: TextStyle(color: cs.onSurfaceVariant), textAlign: TextAlign.center)],
+        if (action != null) ...[const SizedBox(height: 16), action!],
       ]),
+    );
+  }
+}
+
+/// A failed load, with a way out. No connection gets its own friendlier wording, since
+/// patchy mobile data is the most common cause; anything else shows the server's message.
+class ErrorState extends StatelessWidget {
+  const ErrorState({super.key, required this.error, required this.title, this.onRetry});
+  final Object error;
+  final String title;
+  final Future<void> Function()? onRetry;
+
+  static bool isOffline(Object e) => e is ApiException && (e.code == 'offline' || e.code == 'timeout');
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.l10n;
+    final offline = isOffline(error);
+    return EmptyState(
+      icon: offline ? Icons.wifi_off_rounded : Icons.cloud_off_rounded,
+      title: offline ? t.offlineTitle : title,
+      message: offline ? t.offlineMessage : (error is ApiException ? (error as ApiException).message : null),
+      action: onRetry == null ? null : OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh_rounded), label: Text(t.retry)),
     );
   }
 }

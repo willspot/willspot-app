@@ -162,7 +162,7 @@ class _StatementScreenState extends State<StatementScreen> {
           ),
           const SizedBox(height: 12),
           if (_error != null)
-            const EmptyState(icon: Icons.cloud_off_rounded, title: "Couldn't load the statement", message: 'Pull down to try again.')
+            ErrorState(error: _error!, title: "Couldn't load the statement", onRetry: _load)
           else if (d == null)
             const Padding(padding: EdgeInsets.all(48), child: Center(child: CircularProgressIndicator()))
           else ...[

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../core/api.dart';
 import '../../core/app_state.dart';
+import '../../core/l10n.dart';
 import '../../core/money.dart';
 import '../../ui/motion.dart';
 import '../../ui/widgets.dart';
@@ -97,16 +97,17 @@ class HomeScreenState extends State<HomeScreen> {
     final brand = state.brand;
     final cs = Theme.of(context).colorScheme;
     final name = (state.user?['firstName'] as String?) ?? '';
+    final t = context.l10n;
     final actions = <(IconData, String, VoidCallback)>[
-      (Icons.south_west_rounded, 'Add money', () => _open(const DepositScreen())),
-      (Icons.north_east_rounded, 'Withdraw', () => _open(const WithdrawScreen())),
-      (Icons.currency_exchange_rounded, 'Convert', () => _open(const ConvertScreen())),
-      (Icons.add_chart_rounded, 'Buy crypto', () => _open(const TradeScreen(asset: 'USDT', side: 'buy'))),
+      (Icons.south_west_rounded, t.actionAddMoney, () => _open(const DepositScreen())),
+      (Icons.north_east_rounded, t.actionWithdraw, () => _open(const WithdrawScreen())),
+      (Icons.currency_exchange_rounded, t.actionConvert, () => _open(const ConvertScreen())),
+      (Icons.add_chart_rounded, t.actionBuyCrypto, () => _open(const TradeScreen(asset: 'USDT', side: 'buy'))),
     ];
     final extras = <(IconData, String, String, Widget)>[
-      (Icons.card_giftcard_rounded, 'Gift cards', 'gift_cards', const GiftCardsScreen()),
-      (Icons.attach_money_rounded, 'USD account', 'usd_account', const UsdAccountScreen()),
-      (Icons.receipt_rounded, 'Pay bills', 'bill_payments', const BillsScreen()),
+      (Icons.card_giftcard_rounded, t.giftCards, 'gift_cards', const GiftCardsScreen()),
+      (Icons.attach_money_rounded, t.usdAccount, 'usd_account', const UsdAccountScreen()),
+      (Icons.receipt_rounded, t.payBills, 'bill_payments', const BillsScreen()),
     ];
 
     return SafeArea(
@@ -115,14 +116,14 @@ class HomeScreenState extends State<HomeScreen> {
         child: ListView(padding: const EdgeInsets.fromLTRB(20, 12, 20, 32), children: [
           FadeSlideIn(
             child: Row(children: [
-              Expanded(child: Text('Hi $name 👋', style: Theme.of(context).textTheme.headlineSmall)),
+              Expanded(child: Text(t.homeGreeting(name), style: Theme.of(context).textTheme.headlineSmall)),
               IconButton(
                 onPressed: () async {
                   final app = AppScope.read(context);
                   await Navigator.push(context, fadeRoute(InboxScreen(onOpenScreen: _openFromNotification)));
                   app.refreshUnread();
                 },
-                tooltip: state.unread > 0 ? 'Notifications, ${state.unread} unread' : 'Notifications',
+                tooltip: state.unread > 0 ? t.notificationsUnread('${state.unread}') : t.notifications,
                 // The tooltip is the accessible name; keep the badge digit out of it.
                 icon: ExcludeSemantics(
                   child: Badge(
@@ -140,8 +141,8 @@ class HomeScreenState extends State<HomeScreen> {
               delay: const Duration(milliseconds: 60),
               child: _Banner(
                 icon: Icons.shield_outlined,
-                text: !state.hasPin ? 'Set your transaction PIN to start moving money.' : 'Verify your BVN to add money and trade.',
-                cta: !state.hasPin ? 'Set PIN' : 'Verify',
+                text: !state.hasPin ? t.bannerSetPin : t.bannerVerify,
+                cta: !state.hasPin ? t.ctaSetPin : t.ctaVerify,
                 onTap: () => _open(!state.hasPin ? const SetPinScreen() : const KycScreen()),
               ),
             ),
@@ -158,22 +159,22 @@ class HomeScreenState extends State<HomeScreen> {
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
-                  const Text('Naira balance', style: TextStyle(color: Colors.white70)),
+                  Text(t.nairaBalance, style: const TextStyle(color: Colors.white70)),
                   const Spacer(),
                   IconButton(
                     onPressed: () => setState(() => _hidden = !_hidden),
                     icon: Icon(_hidden ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: Colors.white70, size: 20),
-                    tooltip: _hidden ? 'Show balance' : 'Hide balance',
+                    tooltip: _hidden ? t.showBalance : t.hideBalance,
                   ),
                 ]),
                 _loading
                     ? const SizedBox(height: 40, child: Align(alignment: Alignment.centerLeft, child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))))
                     : AnimatedAmount(amount: _bal('NGN'), asset: 'NGN', hidden: _hidden, style: const TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 18),
-                Row(children: [
+                // Wraps onto a second line on narrow phones or large text instead of clipping.
+                Wrap(spacing: 8, runSpacing: 8, children: [
                   for (final a in [if (state.flag('usd_account')) 'USD', 'USDT', 'BTC', 'ETH'])
                     Container(
-                      margin: const EdgeInsets.only(right: 8),
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(999)),
                       child: Text(_hidden ? '•• $a' : Money.format(_bal(a), a), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
@@ -205,9 +206,10 @@ class HomeScreenState extends State<HomeScreen> {
                 ),
               ),
           ]),
-          SectionTitle('More services'),
+          SectionTitle(t.moreServices),
           SizedBox(
-            height: 112,
+            // Grows with the user's text size so labels never clip (tested at 200%).
+            height: 84 + 28 * MediaQuery.textScalerOf(context).scale(1),
             child: ListView(scrollDirection: Axis.horizontal, children: [
               for (final e in extras)
                 Padding(
@@ -222,7 +224,7 @@ class HomeScreenState extends State<HomeScreen> {
                         Icon(e.$1, color: cs.secondary),
                         Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                           Text(e.$2, style: const TextStyle(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
-                          if (!state.flag(e.$3)) Text('Coming soon', style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                          if (!state.flag(e.$3)) Text(t.comingSoon, style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
                         ]),
                       ]),
                     ),
@@ -230,11 +232,11 @@ class HomeScreenState extends State<HomeScreen> {
                 ),
             ]),
           ),
-          SectionTitle('Recent activity', action: TextButton(onPressed: () => widget.onOpenTab(2), child: const Text('See all'))),
+          SectionTitle(t.recentActivity, action: TextButton(onPressed: () => widget.onOpenTab(2), child: Text(t.seeAll))),
           if (_error != null)
-            EmptyState(icon: Icons.cloud_off_rounded, title: "Couldn't load your wallet", message: _error is ApiException ? (_error as ApiException).message : null)
+            ErrorState(error: _error!, title: t.walletLoadFailed, onRetry: reload)
           else if (!_loading && _recent.isEmpty)
-            const EmptyState(icon: Icons.receipt_long_outlined, title: 'No activity yet', message: 'Add money to get started.')
+            EmptyState(icon: Icons.receipt_long_outlined, title: t.noActivityTitle, message: t.noActivityMessage)
           else
             for (final (i, t) in _recent.indexed) FadeSlideIn(delay: Duration(milliseconds: 60 * i), child: TxnTile(t)),
         ]),

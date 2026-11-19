@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../../core/api.dart';
 import '../../core/app_state.dart';
+import '../../core/l10n.dart';
 import '../../core/device_id.dart';
 import '../../core/validation.dart';
 import '../../ui/logo.dart';
 import '../../ui/motion.dart';
 import '../../ui/widgets.dart';
 import '../home/home_shell.dart';
+import '../security/password_screens.dart';
 import 'otp_screen.dart';
 import 'signup_screen.dart';
 
@@ -110,6 +112,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final brand = AppScope.of(context).brand;
+    final t = context.l10n;
     return Scaffold(
       appBar: AppBar(),
       body: SafeArea(
@@ -118,13 +121,13 @@ class _LoginScreenState extends State<LoginScreen> {
           child: ListView(padding: const EdgeInsets.all(24), children: [
             const Align(alignment: Alignment.centerLeft, child: Hero(tag: 'logo', child: BrandLogo(size: 56))),
             const SizedBox(height: 24),
-            FadeSlideIn(child: Text('Welcome back', style: Theme.of(context).textTheme.headlineMedium)),
+            FadeSlideIn(child: Text(t.loginWelcome, style: Theme.of(context).textTheme.headlineMedium)),
             const SizedBox(height: 6),
-            FadeSlideIn(delay: const Duration(milliseconds: 60), child: Text('Log in to ${brand.name}', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
+            FadeSlideIn(delay: const Duration(milliseconds: 60), child: Text(t.loginTo(brand.name), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
             const SizedBox(height: 28),
             FadeSlideIn(
               delay: const Duration(milliseconds: 120),
-              child: TextFormField(controller: _email, decoration: const InputDecoration(labelText: 'Email'), keyboardType: TextInputType.emailAddress, validator: Validation.email, autofillHints: const [AutofillHints.email]),
+              child: TextFormField(controller: _email, decoration: InputDecoration(labelText: t.email), keyboardType: TextInputType.emailAddress, validator: Validation.email, autofillHints: const [AutofillHints.email]),
             ),
             const SizedBox(height: 16),
             FadeSlideIn(
@@ -133,18 +136,22 @@ class _LoginScreenState extends State<LoginScreen> {
                 controller: _password,
                 obscureText: _obscure,
                 decoration: InputDecoration(
-                  labelText: 'Password',
-                  suffixIcon: IconButton(icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined), onPressed: () => setState(() => _obscure = !_obscure), tooltip: 'Show password'),
+                  labelText: t.password,
+                  suffixIcon: IconButton(icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined), onPressed: () => setState(() => _obscure = !_obscure), tooltip: t.showPassword),
                 ),
-                validator: (v) => (v ?? '').isEmpty ? 'Enter your password' : null,
+                validator: (v) => (v ?? '').isEmpty ? t.enterPassword : null,
                 autofillHints: const [AutofillHints.password],
                 onFieldSubmitted: (_) => _submit(),
               ),
             ),
             const SizedBox(height: 28),
-            BusyButton(label: 'Log in', busy: _busy, onPressed: _submit),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(onPressed: () => Navigator.push(context, fadeRoute(ForgotPasswordScreen(email: _email.text.trim()))), child: Text(t.forgotPassword)),
+            ),
+            BusyButton(label: t.logIn, busy: _busy, onPressed: _submit),
             const SizedBox(height: 12),
-            TextButton(onPressed: () => Navigator.pushReplacement(context, fadeRoute(const SignupScreen())), child: const Text("New here? Create an account")),
+            TextButton(onPressed: () => Navigator.pushReplacement(context, fadeRoute(const SignupScreen())), child: Text(t.newHere)),
           ]),
         ),
       ),

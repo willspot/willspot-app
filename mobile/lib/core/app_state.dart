@@ -21,6 +21,10 @@ class AppState extends ChangeNotifier {
   Map<String, bool> flags = const {};
   Map<String, dynamic>? user;
   ThemeMode themeMode = ThemeMode.system;
+  /// The language the user picked in Profile; null follows the phone.
+  Locale? locale;
+  /// Persists the language choice (set in main; tests leave it null).
+  Future<void> Function(Locale?)? saveLocale;
   bool configFromServer = false;
 
   bool flag(String name) => flags[name] ?? false;
@@ -28,6 +32,20 @@ class AppState extends ChangeNotifier {
   int get kycTier => (user?['kycTier'] as num?)?.toInt() ?? 0;
   bool get hasPin => user?['hasPin'] == true;
   bool get totpEnabled => user?['totpEnabled'] == true;
+
+  /// App lock (see features/security/app_lock.dart): true until the PIN is entered.
+  bool locked = false;
+  void lock() {
+    if (!locked) {
+      locked = true;
+      notifyListeners();
+    }
+  }
+
+  void unlock() {
+    locked = false;
+    notifyListeners();
+  }
 
   /// Unread in-app notifications (badge on the bell).
   int unread = 0;
@@ -62,8 +80,12 @@ class AppState extends ChangeNotifier {
   }
 
   /// Restores a session from the stored refresh token, if any.
+  /// A saved session opens locked: the PIN is needed before anything is shown.
   Future<void> restoreSession() async {
-    if (await api.refresh()) await refreshMe();
+    if (await api.refresh()) {
+      await refreshMe();
+      if (hasPin) locked = true;
+    }
   }
 
   Future<void> refreshMe() async {
@@ -96,6 +118,7 @@ class AppState extends ChangeNotifier {
     await api.clearSession();
     user = null;
     unread = 0;
+    locked = false;
     notifyListeners();
   }
 
@@ -103,6 +126,12 @@ class AppState extends ChangeNotifier {
   Future<String> stepUp(String pin, String scope) async {
     final r = await api.post('/v1/me/pin/verify', {'pin': pin, 'scope': scope});
     return r['stepUpToken'] as String;
+  }
+
+  void setLocale(Locale? l) {
+    locale = l;
+    saveLocale?.call(l);
+    notifyListeners();
   }
 
   void setThemeMode(ThemeMode m) {

@@ -253,3 +253,34 @@ describe("field encryption", () => {
     expect(() => c.decrypt([v, iv, short, ct].join("."))).toThrow("bad ciphertext");
   });
 });
+
+describe("weak password check", () => {
+  it("rejects common bases with digits/symbols and personal details, accepts real passphrases", async () => {
+    const { weakPasswordReason } = await import("../src/index.js");
+    for (const p of ["Password123", "Passw0rd2024!", "Naija2024!", "Qwerty12345", "Welcome1!", "Nigeria@123", "Aaaaaaaaaa1"]) expect(weakPasswordReason(p), p).not.toBeNull();
+    expect(weakPasswordReason("Chioma1990x", { names: ["Chioma", "Okafor"] })).toMatch(/name/);
+    expect(weakPasswordReason("Kofi.ade77X", { email: "kofi.ade@example.com" })).toMatch(/email/); // punctuation doesn't hide it
+    for (const p of ["Mango-Bicycle-42", "TwelveRedLamps9", "Smoke Test 123 Lagoon"]) expect(weakPasswordReason(p), p).toBeNull();
+  });
+});
+
+describe("request logging", () => {
+  it("never writes query strings (they can hold personal data) or auth headers to the log", async () => {
+    const lines: string[] = [];
+    const out = process.stdout as unknown as { write: (c: string) => boolean };
+    const prev = out.write.bind(process.stdout);
+    out.write = (c: string) => (lines.push(String(c)), true); // createApp's logger writes JSON lines to stdout
+    try {
+      const app = await createApp("log-test");
+      app.get("/v1/admin/users", async () => ({ ok: true }));
+      await app.inject({ method: "GET", url: "/v1/admin/users?q=08031234567", headers: { authorization: "Bearer secret-token" } });
+      await app.close();
+    } finally {
+      out.write = prev;
+    }
+    const log = lines.join("");
+    expect(log).toContain('"url":"/v1/admin/users"');
+    expect(log).not.toContain("08031234567");
+    expect(log).not.toContain("secret-token");
+  });
+});

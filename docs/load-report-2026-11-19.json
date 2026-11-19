@@ -1,0 +1,238 @@
+{
+  "api": "http://localhost:8080",
+  "users": 60,
+  "concurrency": 30,
+  "durationS": 90,
+  "setupS": 8.233,
+  "total": 143094,
+  "rps": 1589.9333333333334,
+  "errors": 707,
+  "endpoints": [
+    {
+      "endpoint": "withdraw",
+      "requests": 7569,
+      "rps": 84.1,
+      "p50": 58.4,
+      "p95": 154.5,
+      "p99": 212.1,
+      "errors": 707,
+      "errorTypes": {
+        "422 limit_exceeded": 707
+      }
+    },
+    {
+      "endpoint": "statement-pdf",
+      "requests": 2089,
+      "rps": 23.2,
+      "p50": 54.5,
+      "p95": 147.5,
+      "p99": 192.4,
+      "errors": 0,
+      "errorTypes": {}
+    },
+    {
+      "endpoint": "deposit",
+      "requests": 8368,
+      "rps": 93,
+      "p50": 40.4,
+      "p95": 122.4,
+      "p99": 185,
+      "errors": 0,
+      "errorTypes": {}
+    },
+    {
+      "endpoint": "buy",
+      "requests": 14780,
+      "rps": 164.2,
+      "p50": 40,
+      "p95": 112.5,
+      "p99": 157.4,
+      "errors": 0,
+      "errorTypes": {}
+    },
+    {
+      "endpoint": "statement-json",
+      "requests": 3126,
+      "rps": 34.7,
+      "p50": 14.7,
+      "p95": 80.1,
+      "p99": 111,
+      "errors": 0,
+      "errorTypes": {}
+    },
+    {
+      "endpoint": "transactions",
+      "requests": 18055,
+      "rps": 200.6,
+      "p50": 8.3,
+      "p95": 53.4,
+      "p99": 92.7,
+      "errors": 0,
+      "errorTypes": {}
+    },
+    {
+      "endpoint": "balances",
+      "requests": 26717,
+      "rps": 296.9,
+      "p50": 6.4,
+      "p95": 49.7,
+      "p99": 89.1,
+      "errors": 0,
+      "errorTypes": {}
+    },
+    {
+      "endpoint": "quote",
+      "requests": 14780,
+      "rps": 164.2,
+      "p50": 1.8,
+      "p95": 4.1,
+      "p99": 5.9,
+      "errors": 0,
+      "errorTypes": {}
+    },
+    {
+      "endpoint": "pin-verify",
+      "requests": 22349,
+      "rps": 248.3,
+      "p50": 1.7,
+      "p95": 3.8,
+      "p99": 5.4,
+      "errors": 0,
+      "errorTypes": {}
+    },
+    {
+      "endpoint": "notifications",
+      "requests": 10510,
+      "rps": 116.8,
+      "p50": 1.8,
+      "p95": 3.7,
+      "p99": 5.2,
+      "errors": 0,
+      "errorTypes": {}
+    },
+    {
+      "endpoint": "markets",
+      "requests": 6258,
+      "rps": 69.5,
+      "p50": 1.2,
+      "p95": 3.2,
+      "p99": 4.7,
+      "errors": 0,
+      "errorTypes": {}
+    },
+    {
+      "endpoint": "config",
+      "requests": 8493,
+      "rps": 94.4,
+      "p50": 1.1,
+      "p95": 2.6,
+      "p99": 4.2,
+      "errors": 0,
+      "errorTypes": {}
+    }
+  ],
+  "services": [
+    {
+      "service": "bills",
+      "cpuCores": 0,
+      "rssMb": 82
+    },
+    {
+      "service": "config",
+      "cpuCores": 0.04,
+      "rssMb": 142
+    },
+    {
+      "service": "gateway",
+      "cpuCores": 0.3,
+      "rssMb": 282
+    },
+    {
+      "service": "giftcards",
+      "cpuCores": 0,
+      "rssMb": 79
+    },
+    {
+      "service": "identity",
+      "cpuCores": 0.24,
+      "rssMb": 157
+    },
+    {
+      "service": "notifications",
+      "cpuCores": 0.14,
+      "rssMb": 141
+    },
+    {
+      "service": "risk",
+      "cpuCores": 0.16,
+      "rssMb": 136
+    },
+    {
+      "service": "support",
+      "cpuCores": 0,
+      "rssMb": 81
+    },
+    {
+      "service": "trade",
+      "cpuCores": 0.37,
+      "rssMb": 237
+    },
+    {
+      "service": "wallet",
+      "cpuCores": 1.23,
+      "rssMb": 466
+    }
+  ],
+  "setup": [
+    {
+      "endpoint": "signup",
+      "requests": 60,
+      "p50": 765.9,
+      "p95": 1401.8,
+      "errors": 0
+    },
+    {
+      "endpoint": "verify-otp",
+      "requests": 60,
+      "p50": 525,
+      "p95": 1051.1,
+      "errors": 0
+    },
+    {
+      "endpoint": "set-pin",
+      "requests": 60,
+      "p50": 835,
+      "p95": 1103.4,
+      "errors": 0
+    },
+    {
+      "endpoint": "bvn",
+      "requests": 60,
+      "p50": 268.9,
+      "p95": 799.7,
+      "errors": 0
+    },
+    {
+      "endpoint": "refresh",
+      "requests": 60,
+      "p50": 260.4,
+      "p95": 719.8,
+      "errors": 0
+    },
+    {
+      "endpoint": "virtual-account",
+      "requests": 60,
+      "p50": 5.5,
+      "p95": 44.7,
+      "errors": 0
+    },
+    {
+      "endpoint": "deposit",
+      "requests": 60,
+      "p50": 12.9,
+      "p95": 62.8,
+      "errors": 0
+    }
+  ],
+  "at": "2026-11-19T09:05:53.195Z"
+}

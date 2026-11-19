@@ -34,7 +34,7 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Take a photo of a gift card you want to sell.</string>
+	<string>Take a selfie to verify your identity, or a photo of a gift card you want to sell.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Choose a photo of a gift card you want to sell.</string>
 	<key>UIApplicationSceneManifest</key>

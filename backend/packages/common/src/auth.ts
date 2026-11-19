@@ -60,7 +60,8 @@ const AUD_ACCESS = "willspot-api";
 const AUD_STEP_UP = "willspot-step-up";
 const ALG = "EdDSA";
 
-export type StepUpScope = "withdraw" | "trade" | "pay" | "delete_account";
+/** "unlock" proves the PIN when the app reopens after being in the background (app lock). */
+export type StepUpScope = "withdraw" | "trade" | "pay" | "delete_account" | "unlock";
 
 export class TokenIssuer {
   constructor(private readonly key: CryptoKey) {}
@@ -90,12 +91,33 @@ export class TokenIssuer {
   }
 }
 
+/**
+ * Verifies with any of the configured public keys, so the signing key can be rotated
+ * without signing everyone out: publish the new public key next to the old one, switch
+ * the private key, and remove the old public key after the longest token lifetime.
+ */
 export class TokenVerifier {
-  constructor(private readonly key: CryptoKey) {}
+  private readonly keys: CryptoKey[];
+  constructor(key: CryptoKey | CryptoKey[]) {
+    this.keys = Array.isArray(key) ? key : [key];
+    if (!this.keys.length) throw new Error("TokenVerifier needs at least one key");
+  }
+
+  private async verifyAny(token: string, audience: string) {
+    let last: unknown;
+    for (const k of this.keys) {
+      try {
+        return await jwtVerify(token, k, { issuer: ISSUER, audience, algorithms: [ALG] });
+      } catch (e) {
+        last = e;
+      }
+    }
+    throw last;
+  }
 
   async verifyAccess(token: string): Promise<AuthUser> {
     try {
-      const { payload } = await jwtVerify(token, this.key, { issuer: ISSUER, audience: AUD_ACCESS, algorithms: [ALG] });
+      const { payload } = await this.verifyAny(token, AUD_ACCESS);
       const role = payload.role === "admin" ? "admin" : "user";
       const roles = role === "admin" ? (Array.isArray(payload.roles) ? payload.roles.filter(isAdminRole) : []) : undefined;
       return { id: String(payload.sub), role, tier: Number(payload.tier ?? 0), sid: String(payload.sid ?? ""), ...(payload.mfa === true ? { mfa: true } : {}), ...(roles ? { roles } : {}) };
@@ -107,7 +129,7 @@ export class TokenVerifier {
   async verifyStepUp(token: string | undefined, userId: string, scope: StepUpScope): Promise<{ jti: string }> {
     if (!token) throw forbidden("Enter your transaction PIN to continue");
     try {
-      const { payload } = await jwtVerify(token, this.key, { issuer: ISSUER, audience: AUD_STEP_UP, algorithms: [ALG] });
+      const { payload } = await this.verifyAny(token, AUD_STEP_UP);
       if (payload.sub !== userId || payload.scope !== scope || !payload.jti) throw new Error("mismatch");
       return { jti: payload.jti };
     } catch {
@@ -118,7 +140,11 @@ export class TokenVerifier {
 
 const pem = (v: string) => v.replace(/\\n/g, "\n");
 export const loadIssuer = async (privatePem: string) => new TokenIssuer(await importPKCS8(pem(privatePem), ALG));
-export const loadVerifier = async (publicPem: string) => new TokenVerifier(await importSPKI(pem(publicPem), ALG));
+/** One or more PEM public keys (concatenated) — see TokenVerifier for rotation. */
+export const loadVerifier = async (publicPem: string) => {
+  const blocks = pem(publicPem).match(/-----BEGIN PUBLIC KEY-----[\s\S]+?-----END PUBLIC KEY-----/g) ?? [pem(publicPem)];
+  return new TokenVerifier(await Promise.all(blocks.map((b) => importSPKI(b, ALG))));
+};
 
 export async function generateSigningKeys(): Promise<{ privatePem: string; publicPem: string }> {
   const { privateKey, publicKey } = await generateKeyPair(ALG, { extractable: true });

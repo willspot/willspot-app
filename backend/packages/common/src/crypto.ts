@@ -81,3 +81,32 @@ export function hmacVerify(secret: string, body: string, signature: string | und
   if (!signature) return false;
   return safeEqual(hmacSign(secret, body), signature);
 }
+
+/**
+ * Transaction PINs (4 digits = 10,000 values) are hashed with HMAC-SHA256 keyed by a
+ * server-side pepper instead of scrypt. Slow hashing barely slows an offline attack on
+ * so few values (~45 min at 262 ms each) yet cost 262 ms CPU + 128 MB per payment; with
+ * a pepper kept outside the database, a stolen database alone can't test any PIN.
+ * Online guessing is limited by the PIN lockout. Bound to the user id so equal PINs differ.
+ */
+const PIN_PREFIX = "hmac-sha256:v1:";
+export class PinHasher {
+  private readonly key: Buffer;
+  constructor(pepper: string) {
+    this.key = Buffer.from(pepper, "base64");
+    if (this.key.length < 32) throw new Error("PIN pepper must be at least 32 bytes (base64)");
+  }
+  hash(userId: string, pin: string): string {
+    return PIN_PREFIX + createHmac("sha256", this.key).update(userId + ":" + pin).digest("base64");
+  }
+  /** Checks a PIN against either format; `upgrade` is true when a legacy scrypt hash matched. */
+  async verify(userId: string, pin: string, stored: string): Promise<{ ok: boolean; upgrade: boolean }> {
+    if (stored.startsWith(PIN_PREFIX)) {
+      const a = Buffer.from(this.hash(userId, pin));
+      const b = Buffer.from(stored);
+      return { ok: a.length === b.length && timingSafeEqual(a, b), upgrade: false };
+    }
+    const ok = await verifySecret(pin, stored);
+    return { ok, upgrade: ok };
+  }
+}

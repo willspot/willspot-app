@@ -43,7 +43,7 @@ Each service reads **only** its own Secret. Every key can also be supplied as `K
 
 | Secret | Keys |
 |---|---|
-| `<release>-identity` | `IDENTITY_DATABASE_URL`, `MIGRATOR_DATABASE_URL`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `IDENTITY_FIELD_KEY`, `SERVICE_TOKEN_IDENTITY`, `SERVICE_TOKEN_WALLET`, `SERVICE_TOKEN_TRADE`, `SERVICE_TOKEN_GIFTCARDS`, `SERVICE_TOKEN_BILLS`, `SERVICE_TOKEN_RISK`, `TERMII_*`, `DOJAH_*`; optionally `ADMIN_EMAIL`/`ADMIN_PASSWORD` for the first admin (remove after first start) |
+| `<release>-identity` | `IDENTITY_DATABASE_URL`, `MIGRATOR_DATABASE_URL`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` (several PEM blocks while rotating keys), `IDENTITY_FIELD_KEY`, `IDENTITY_PIN_PEPPER` (32+ random bytes, base64; required in production; never rotate it without a re-PIN plan, since existing PINs stop matching), `SERVICE_TOKEN_IDENTITY`, `SERVICE_TOKEN_WALLET`, `SERVICE_TOKEN_TRADE`, `SERVICE_TOKEN_GIFTCARDS`, `SERVICE_TOKEN_BILLS`, `SERVICE_TOKEN_RISK`, `TERMII_*`, `DOJAH_*`; optionally `ADMIN_EMAIL`/`ADMIN_PASSWORD` for the first admin (remove after first start) |
 | `<release>-wallet` | `WALLET_DATABASE_URL`, `MIGRATOR_DATABASE_URL`, `JWT_PUBLIC_KEY`, `SERVICE_TOKEN_WALLET`, `SERVICE_TOKEN_TRADE`, `SERVICE_TOKEN_GIFTCARDS`, `SERVICE_TOKEN_BILLS`, `DEPOSIT_WEBHOOK_SECRET`, `PAYSTACK_SECRET_KEY`, `OPS_ALERT_WEBHOOK_URL`; optional `REFERRAL_REWARD_NGN`, `REFERRAL_MIN_DEPOSIT_NGN`, `REFERRAL_MONTHLY_CAP` |
 | `<release>-trade` | `TRADE_DATABASE_URL`, `MIGRATOR_DATABASE_URL`, `JWT_PUBLIC_KEY`, `SERVICE_TOKEN_TRADE`, `OPS_ALERT_WEBHOOK_URL` |
 | `<release>-config` | `CONFIG_DATABASE_URL`, `MIGRATOR_DATABASE_URL`, `JWT_PUBLIC_KEY`, `SERVICE_TOKEN_*` of every caller |
@@ -181,18 +181,16 @@ Without them, push stays off and the in-app inbox still works.
 
 **UNVERIFIED:** real delivery to a device. FCM was tested against a fake server built from Google's documented contract, and the app was built with the Firebase SDK but no Firebase project.
 
-## Store submissions (owner checklist, not done)
+## Sizing and session settings
 
-- **Google Play:**
-  - developer account;
-  - app signing key kept in Play App Signing;
-  - Data safety form matching [SECURITY.md](SECURITY.md): what is collected (name, phone, email, BVN, ID images, device signals), encrypted in transit, deletion supported in-app;
-  - financial-features declaration;
-  - target the current API level.
-- **App Store:**
-  - developer account;
-  - privacy nutrition labels;
-  - export-compliance answer (standard HTTPS only);
-  - an account-deletion path (already in Profile → Close account);
-  - a demo account for review.
-- Both stores ask for licences for financial and crypto features in Nigeria. This is blocked on counsel ([BENNYBIT_ANALYSIS §6](BENNYBIT_ANALYSIS.md)).
+- **Resource requests, limits and autoscaling ranges** in `values.yaml` come from the load test ([LOAD_TEST.md](LOAD_TEST.md)). The busiest service is the wallet, at about 0.8 cores per 1,000 req/s. Re-check them on staging.
+- **`UV_THREADPOOL_SIZE`** (default 8 in the chart) sets how many password hashes run in parallel. Raise it with the identity pod's CPU.
+- **`SESSION_IDLE_DAYS`** (identity, default 14) signs out devices left unused for that long. The absolute session limit stays at 30 days.
+
+## Store submissions
+
+Listing text, data-safety and privacy-label drafts, icons, splash screens and screenshots are in [docs/store](store/README.md). Still owner-only:
+- developer accounts and signing keys;
+- the privacy-policy and account-deletion pages;
+- a reviewer demo account;
+- counsel's sign-off on the data declarations and the licences for financial and crypto features in Nigeria ([BENNYBIT_ANALYSIS §6](BENNYBIT_ANALYSIS.md)).

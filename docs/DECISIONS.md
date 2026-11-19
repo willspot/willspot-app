@@ -120,3 +120,81 @@ The FAQ is a third config document next to brand and flags, seeded from `brand/f
 
 ## ADR-034 — PDF statements generated on the server (2026-11-19)
 `format=pdf` on the statements endpoint builds an A4 PDF with pdf-lib (MIT): summary box, running balance, paging, and a footer carrying a reference (SHA-256 of the statement content) that support can recompute. The built-in Helvetica covers only Latin-1, so ₦ prints as "NGN", accents are dropped and other characters become "?". The PDF never fails on unusual names. Embedding a font with full Unicode coverage is a possible later improvement. The app saves the PDF to its temporary folder, opens the system share sheet (share_plus), and deletes the file when the screen closes.
+
+## ADR-035 — Pre-launch security self-review against ASVS 4.0.3 L2 and MASVS v2 (2026-11-19)
+Before the external penetration test, we reviewed every area against OWASP ASVS level 2 (backend, gateway, dashboard) and MASVS v2 (Flutter app), fixed the gaps we found, and recorded the rest in [SECURITY_REVIEW.md](SECURITY_REVIEW.md).
+
+**Fixes made:**
+- password reset that doesn't reveal whether an email is registered, and needs two-factor when it's on (SIM-swap protection);
+- password change;
+- session list and revoke;
+- 14-day idle timeout;
+- signing-key rotation;
+- weak-password checks;
+- app lock and privacy cover;
+- no query strings in logs.
+
+**Device checks added later:**
+- content under the app lock is hidden from screen readers;
+- the unused microphone permission is gone;
+- contrast is fixed.
+
+This review **prepares for the pen test; it does not replace it.**
+
+## ADR-036 — Transaction PINs hashed with HMAC-SHA256 and a server-side pepper (2026-11-19)
+**Problem.** The load test showed that hashing 4-digit PINs with scrypt (N=2^17, the password setting) cost 262 ms of CPU and 128 MB per payment. At 96 req/s that queued PIN checks to a p95 of 1.9 s, with identity using 4 cores. Slow hashing barely protects a 4-digit PIN anyway: 10,000 values take about 45 minutes even at 262 ms each.
+
+**Decision.** PINs are stored as `hmac-sha256:v1:` + HMAC(pepper, userId:PIN). The pepper is `IDENTITY_PIN_PEPPER`, 32+ bytes kept outside the database and its backups, and production refuses to start without it.
+- **Stolen database:** useless for testing PINs without the pepper.
+- **Online guessing:** still stopped by the PIN lockout.
+- **Migration:** legacy scrypt hashes are upgraded on the next correct PIN.
+- **Passwords:** stay on scrypt.
+
+**Result.** PIN check p95 3.8 ms; throughput 1,590 req/s.
+
+**Trade-off.** Losing or rotating the pepper invalidates every PIN, so it needs a re-PIN plan.
+
+## ADR-037 — App translations with gen-l10n; Pidgin, Yorùbá, Hausa and Igbo as reviewed drafts (2026-11-19)
+**Tooling.** Flutter's own gen-l10n with ARB files: `flutter_localizations` from the SDK, plus `intl` 0.20.x (BSD-3). No third-party translation service and no runtime downloads.
+
+**Languages.** English is the template. `pcm`, `yo`, `ha` and `ig` ship as drafts, marked in the app and in [TRANSLATIONS.md](TRANSLATIONS.md), until a native speaker signs each one off.
+
+**Fallback.** Flutter has no Material or Cupertino strings for these languages, so a fallback delegate gives its built-in widgets English rather than failing.
+
+**Choosing a language.** The app follows the phone's language if it is supported, and users can pick one in Profile, where each language is listed in its own name.
+
+**Coverage.** The first pass covers the screens everyone sees; the rest move over screen by screen. A test keeps every ARB file's keys and placeholders identical to English.
+
+## ADR-038 — Embedded Noto Sans in PDF statements (2026-11-19)
+This supersedes the font limitation in ADR-034. Statements embed Noto Sans (SIL OFL 1.1, from google/fonts) through `@pdf-lib/fontkit` 1.1.1 (MIT), so ₦ and Nigerian names (Adébáyọ̀, Ɗanjuma, Ụchẹ) print as written.
+
+**Font files.** Static Regular and Bold were cut once from the variable font with fontTools 4.68 (MIT), in a throwaway uv environment. They are subset to Latin, Latin Extended, IPA, combining marks and the Naira sign, about 118 KB each, and committed with OFL.txt. Each PDF embeds only the glyphs it uses.
+
+**Character handling.** Characters the font lacks are tried as base letter plus accents, and otherwise become "?". If the font files are missing, the PDF falls back to Helvetica (the ADR-034 behaviour).
+
+**Shaping.** The `ccmp` feature is off: it split ọ into o + an unmapped dot glyph, which broke copy/paste and search. Rendering is identical without it, checked visually.
+
+## ADR-039 — Store assets generated from the brand files (2026-11-19)
+**Why.** Icons, splash screens, the Play feature graphic and the store screenshots are generated from `brand/logo-mark.svg` and `brand/brand.json`, so a rebrand regenerates everything (`mobile/tool/make_store_assets.sh`, `compose_screenshots.py`).
+
+**How they are rendered.** Locally, with Google Chrome headless (throwaway profile) and macOS `sips`. No new dependencies and no downloads.
+
+**What is produced:**
+- Android: legacy icon, adaptive icon with a monochrome layer, Android 12+ splash theme;
+- iOS: opaque full-bleed icons, and a launch screen with a named light/dark colour.
+
+**Screenshots** are real captures from the emulator and simulator against the dev stack, framed with captions. Play allows at most a 2:1 aspect ratio, so they are composed at 1080×1920. App Store screenshots are 1290×2796.
+
+**Data declarations.** The Play data-safety and Apple privacy-label drafts in docs/store were written from the code (API calls, merged manifest, SDK list) and **need counsel's sign-off**.
+
+## ADR-040 — Load testing with our own script (2026-11-19)
+**Tool.** k6 is AGPL-3.0, which is a blocker under our licence rules, so `backend/scripts/load.ts` (Node, no new dependencies) drives the real API through the gateway.
+
+**What it does:**
+- sets up real accounts end to end;
+- runs a weighted mixed workload;
+- reports p50/p95/p99 latency and errors per endpoint;
+- reads each service's CPU and memory from its metrics port;
+- refuses URLs that look like production.
+
+**Use.** Results and the Helm sizing taken from them are in [LOAD_TEST.md](LOAD_TEST.md). The next run is on staging, from a separate machine.

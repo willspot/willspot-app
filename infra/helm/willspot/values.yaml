@@ -29,6 +29,9 @@ config:
   OTEL_EXPORTER_OTLP_ENDPOINT: ""   # e.g. http://otel-collector.observability:4318
   NATS_URL: nats://nats.nats:4222   # install NATS separately (official nats Helm chart, JetStream on)
   REDIS_URL: ""                     # required when gateway.replicas > 1 (shared rate limits)
+  # Node's worker pool runs password hashing (scrypt, ~0.26 CPU-s each). The default 4 threads
+  # queue sign-up/login bursts on bigger pods; match it to the identity pod's CPU (docs/LOAD_TEST.md).
+  UV_THREADPOOL_SIZE: "8"
 
 # Secrets. Each service reads ONLY its own Secret "<release>-<service>" (least privilege).
 # Keys each one needs are listed in docs/DEPLOYMENT.md. Either create them yourself, or
@@ -47,7 +50,8 @@ services:
     port: 8080
     replicas: 3
     public: true
-    resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { memory: 256Mi } }
+    # Sizes from docs/LOAD_TEST.md (2026-11-19): ~0.2 cores per 1,000 req/s through the gateway.
+    resources: { requests: { cpu: 200m, memory: 192Mi }, limits: { memory: 384Mi } }
     autoscaling: { enabled: true, minReplicas: 3, maxReplicas: 12, cpu: 70 }
     # who may call this service inside the cluster (NetworkPolicy)
     allowFrom: []
@@ -62,14 +66,15 @@ services:
     port: 4002
     replicas: 2
     database: true
-    resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 384Mi } }
-    autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 }
+    # The busiest service under load (ledger writes, statements): ~0.8 cores per 1,000 req/s.
+    resources: { requests: { cpu: 400m, memory: 256Mi }, limits: { memory: 640Mi } }
+    autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 10, cpu: 70 }
     allowFrom: [gateway, trade, giftcards, bills]
   trade:
     port: 4003
     replicas: 2
     database: true
-    resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 384Mi } }
+    resources: { requests: { cpu: 200m, memory: 192Mi }, limits: { memory: 512Mi } }
     autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 6, cpu: 70 }
     allowFrom: [gateway]
   config:

@@ -34,13 +34,13 @@ check("no x-powered-by at the edge", cfg.headers.get("x-powered-by") === null);
 
 const phone = `080${randomInt(10_000_000, 99_999_999)}`;
 const email = `smoke+${randomUUID().slice(0, 8)}@example.com`;
-const su = await call("POST", "/v1/auth/signup", { email, phone, password: "SmokeTest123", firstName: "Smoke", lastName: "Tester" });
+const su = await call("POST", "/v1/auth/signup", { email, phone, password: "Lagoon-Kite-482", firstName: "Smoke", lastName: "Tester" }); // gitleaks:allow (test password for a sandbox account)
 check("sign up", su.status === 201 && !!su.json.devOtp, su.json);
 const v = await call("POST", "/v1/auth/verify-otp", { userId: su.json.userId, code: su.json.devOtp });
 check("verify OTP -> tokens", v.status === 200 && !!v.json.accessToken, v.json);
 let token = v.json.accessToken as string;
 
-check("set PIN", (await call("POST", "/v1/me/pin", { pin: "4826", password: "SmokeTest123" }, token)).status === 200);
+check("set PIN", (await call("POST", "/v1/me/pin", { pin: "4826", password: "Lagoon-Kite-482" }, token)).status === 200); // gitleaks:allow (test password for a sandbox account)
 const bvn = await call("POST", "/v1/kyc/bvn", { bvn: "22233344455", dob: "1995-05-05" }, token);
 check("BVN (sandbox) -> tier 1", bvn.json.tier === 1, bvn.json);
 token = (await call("POST", "/v1/auth/refresh", { refreshToken: v.json.refreshToken })).json.accessToken;
@@ -183,7 +183,7 @@ if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
 
   const myCode = (await call("GET", "/v1/me", undefined, token)).json.referralCode as string;
   const fPhone = `080${randomInt(10_000_000, 99_999_999)}`;
-  const fsu = await call("POST", "/v1/auth/signup", { email: `friend+${randomUUID().slice(0, 8)}@example.com`, phone: fPhone, password: "SmokeTest123", firstName: "Friend", lastName: "Invited", referralCode: myCode.toLowerCase() });
+  const fsu = await call("POST", "/v1/auth/signup", { email: `friend+${randomUUID().slice(0, 8)}@example.com`, phone: fPhone, password: "Lagoon-Kite-482", firstName: "Friend", lastName: "Invited", referralCode: myCode.toLowerCase() }); // gitleaks:allow (test password for a sandbox account)
   check("referrals: friend signs up with the code", fsu.status === 201, fsu.json);
   const fv = (await call("POST", "/v1/auth/verify-otp", { userId: fsu.json.userId, code: fsu.json.devOtp })).json;
   await call("POST", "/v1/kyc/bvn", { bvn: "22233344466", dob: "1996-06-06" }, fv.accessToken);

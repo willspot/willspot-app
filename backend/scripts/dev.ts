@@ -5,7 +5,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 
@@ -13,7 +13,8 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const env: Record<string, string> = { ...(process.env as Record<string, string>) };
 for (const line of readFileSync(`${root}.env`, "utf8").split("\n")) {
   const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
-  if (m) env[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
+  // Variables already set in the shell win over .env (e.g. RATE_LIMIT_GENERAL=1000000 npm run dev).
+  if (m && process.env[m[1]!] === undefined) env[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
 }
 
 // Phase 4 additions for an older .env: derive the notifications DB and URL.
@@ -21,6 +22,8 @@ env.NOTIFICATIONS_DATABASE_URL ??= env.IDENTITY_DATABASE_URL!.replace(/willspot_
 env.NOTIFICATIONS_INTERNAL_URL ??= "http://localhost:4008";
 env.SUPPORT_DATABASE_URL ??= env.IDENTITY_DATABASE_URL!.replace(/willspot_identity/, "willspot_support");
 env.SUPPORT_INTERNAL_URL ??= "http://localhost:4009";
+// Older .env files predate the PIN pepper: derive a stable dev-only one from the dev signing key.
+env.IDENTITY_PIN_PEPPER ??= createHash("sha256").update(env.JWT_PRIVATE_KEY + ":pin-pepper").digest("base64");
 // Older .env files predate the support service: a throwaway local token is fine for dev.
 env.SERVICE_TOKEN_SUPPORT ??= randomBytes(32).toString("base64url");
 

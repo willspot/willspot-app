@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
@@ -99,6 +100,25 @@ class Brand {
         end: Alignment.bottomRight,
       );
 
+  /// WCAG contrast ratio between two colours (1 to 21).
+  static double contrast(Color a, Color b) {
+    final x = a.computeLuminance(), y = b.computeLuminance();
+    return (math.max(x, y) + 0.05) / (math.min(x, y) + 0.05);
+  }
+
+  /// White or near-black, whichever reads better on [bg].
+  static Color onColor(Color bg) => contrast(Colors.white, bg) >= contrast(const Color(0xFF14121F), bg) ? Colors.white : const Color(0xFF14121F);
+
+  /// [c] darkened (light backgrounds) or lightened (dark ones) just enough to be readable as text on [bg].
+  static Color readable(Color c, Color bg, {double target = 4.5}) {
+    var h = HSLColor.fromColor(c);
+    final darken = bg.computeLuminance() > 0.5;
+    for (var i = 0; i < 25 && contrast(h.toColor(), bg) < target; i++) {
+      h = h.withLightness((h.lightness + (darken ? -0.02 : 0.02)).clamp(0.0, 1.0));
+    }
+    return h.toColor();
+  }
+
   ThemeData theme(Brightness brightness) {
     final dark = brightness == Brightness.dark;
     final bg = dark ? const Color(0xFF0F0E17) : background;
@@ -107,13 +127,15 @@ class Brand {
     final scheme = ColorScheme(
       brightness: brightness,
       primary: primary,
-      onPrimary: Colors.white,
+      // Brand colours are customer-editable, so text colours on them are chosen by contrast
+      // (WCAG AA 4.5:1) rather than assumed white.
+      onPrimary: onColor(primary),
       secondary: secondary,
-      onSecondary: Colors.white,
+      onSecondary: onColor(secondary),
       tertiary: accent,
-      onTertiary: text,
-      error: danger,
-      onError: Colors.white,
+      onTertiary: onColor(accent),
+      error: readable(danger, surf),
+      onError: onColor(readable(danger, surf)),
       surface: surf,
       onSurface: fg,
       surfaceContainerHighest: dark ? const Color(0xFF262338) : const Color(0xFFEDEBF5),

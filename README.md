@@ -74,6 +74,41 @@ cd web && npm run typecheck && npm run build
 
 Production deployment, secrets, observability, backups and push setup: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
+## Verification (2026-11-19, launch readiness)
+- **Backend:**
+  - 176 tests pass (24 files) and typecheck passes;
+  - `npm audit` (high) finds 0 vulnerabilities, Semgrep with CI's settings is clean, and gitleaks finds no leaks in the changed files (test passwords marked `gitleaks:allow`);
+  - the smoke test passes against the running stack;
+  - admin dashboard builds; web typecheck passes.
+- **App:** 50 Flutter tests pass and the analyzer is clean. New in `test/phase7_test.dart`:
+  - ARB key and placeholder parity;
+  - Home in each language;
+  - the language picker;
+  - offline state with retry;
+  - app lock (including screen-reader hiding; confirmed the test fails without the fix);
+  - forgot password;
+  - signed-in devices;
+  - tap-target, label and contrast guidelines;
+  - 200% text.
+- **Load:** 143,094 requests in 90 s (1,590 req/s). The only errors were 707 expected daily-limit refusals on withdrawals ([LOAD_TEST.md](docs/LOAD_TEST.md)).
+- **On devices:**
+  - **Android emulator (API 35):**
+    - new icon and Android 12 splash;
+    - log in;
+    - app lock on restore, with only the lock screen exposed to accessibility;
+    - Pidgin and Yorùbá rendering;
+    - buy quote;
+    - help centre;
+    - the merged manifest no longer asks for the microphone.
+  - **iPhone 17 simulator:** launch screen, log in, app lock, buy quote with the keyboard dismissed, help centre.
+- **PDF:** ₦, Adébáyọ̀ and Ọlá render, checked visually and by reading the text back in tests.
+- **Not verified:**
+  - native-speaker review of the translations;
+  - real devices;
+  - load on staging or real providers, and Postgres under load;
+  - store submission itself (needs your accounts, signing and counsel);
+  - VoiceOver/TalkBack by a person (only automated semantics checks).
+
 ## Verification (2026-11-19, phase 6)
 - **KYC selfie:**
   - guided front-camera capture with an animated oval;

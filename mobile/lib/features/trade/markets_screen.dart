@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../core/api.dart';
 import '../../core/app_state.dart';
 import '../../core/money.dart';
 import '../../ui/motion.dart';
@@ -58,7 +57,7 @@ class _MarketsScreenState extends State<MarketsScreen> {
           if (!state.flag('crypto_trading'))
             const EmptyState(icon: Icons.pause_circle_outline, title: 'Trading is paused', message: 'Check back soon.')
           else if (_error != null)
-            EmptyState(icon: Icons.cloud_off_rounded, title: "Couldn't load prices", message: _error is ApiException ? (_error as ApiException).message : null)
+            ErrorState(error: _error!, title: "Couldn't load prices", onRetry: _load)
           else if (_items.isEmpty)
             const Padding(padding: EdgeInsets.all(48), child: Center(child: CircularProgressIndicator()))
           else

@@ -23,5 +23,7 @@ await build({
   banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
   logLevel: "warning",
 });
+// Files a service reads at run time (next to the bundle, same relative path as in src/).
+if (existsSync(`services/${service}/fonts`)) cpSync(`services/${service}/fonts`, `${out}/fonts`, { recursive: true });
 if (existsSync(`services/${service}/migrations`)) cpSync(`services/${service}/migrations`, `${out}/migrations`, { recursive: true });
 console.log(`built ${out}/bin/server.mjs`);

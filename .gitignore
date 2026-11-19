@@ -29,3 +29,6 @@ backend/**/*.js.map
 
 # local NATS JetStream data (scripts/dev.ts)
 backend/.nats-data/
+
+# load test output (copy notable runs into docs/)
+backend/load-report.json

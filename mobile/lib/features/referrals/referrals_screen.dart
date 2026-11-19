@@ -54,7 +54,7 @@ class _ReferralsScreenState extends State<ReferralsScreen> {
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(padding: const EdgeInsets.all(20), children: [
-          if (_error != null) const EmptyState(icon: Icons.cloud_off_rounded, title: "Couldn't load your referrals", message: 'Pull down to try again.'),
+          if (_error != null) ErrorState(error: _error!, title: "Couldn't load your referrals", onRetry: _load),
           FadeSlideIn(
             child: Container(
               padding: const EdgeInsets.all(22),

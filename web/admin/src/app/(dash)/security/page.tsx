@@ -63,6 +63,41 @@ export default function Security() {
           </motion.div>
         )}
       </div>
+      <ChangePassword />
     </>
+  );
+}
+
+/** Staff password change. Other sessions are signed out by the server. */
+function ChangePassword() {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="card grid"
+      style={{ marginTop: 16, maxWidth: 480 }}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const form = e.currentTarget;
+        const f = new FormData(form);
+        if (f.get("next") !== f.get("confirm")) return toast("The new passwords don't match");
+        setBusy(true);
+        try {
+          await api("/v1/me/password", { currentPassword: f.get("current"), newPassword: f.get("next") });
+          form.reset();
+          toast("Password changed. Your other sessions were signed out.");
+        } catch (err) {
+          toast((err as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <h2>Change password</h2>
+      <label>Current password<input name="current" type="password" autoComplete="current-password" required /></label>
+      <label>New password<input name="next" type="password" autoComplete="new-password" minLength={10} required /></label>
+      <label>Confirm new password<input name="confirm" type="password" autoComplete="new-password" minLength={10} required /></label>
+      <button className="btn" disabled={busy} style={{ justifySelf: "start" }}>{busy ? "Saving…" : "Change password"}</button>
+    </form>
   );
 }

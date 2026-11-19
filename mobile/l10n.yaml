@@ -1,0 +1,9 @@
+# Translations: edit lib/l10n/app_<lang>.arb, then `flutter gen-l10n` (also runs on build).
+# English is the template. pcm, yo, ha and ig are drafts until native speakers sign them off
+# (docs/TRANSLATIONS.md).
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+nullable-getter: false
+untranslated-messages-file: build/l10n_untranslated.json

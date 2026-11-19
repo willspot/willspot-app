@@ -1,4 +1,4 @@
-import { FieldCipher, FlagsClient, createPool, loadIssuer, loadVerifier, busFromEnv, loadSecretFiles, migrateOnlyAndExit, serve, startOutboxRelay } from "@willspot/common";
+import { FieldCipher, FlagsClient, PinHasher, createPool, loadIssuer, loadVerifier, busFromEnv, loadSecretFiles, migrateOnlyAndExit, serve, startOutboxRelay } from "@willspot/common";
 import { buildIdentity, seedAdmin, MIGRATIONS } from "./app.js";
 import { DojahFaceVerifier, DojahKycProvider, SandboxFaceVerifier, SandboxKycProvider, SandboxOtpSender, TermiiOtpSender, type FaceVerifier, type KycProvider, type OtpSender } from "./providers.js";
 
@@ -13,6 +13,9 @@ const production = process.env.NODE_ENV === "production";
 const exposeDevOtp = env("OTP_MODE", "sandbox") === "sandbox" && process.env.EXPOSE_DEV_OTP === "1";
 if (production && (exposeDevOtp || process.env.WILLSPOT_FAST_HASH === "1")) {
   throw new Error("Refusing to start: dev OTP exposure or fast hashing is enabled in production");
+}
+if (production && !process.env.IDENTITY_PIN_PEPPER) {
+  throw new Error("Refusing to start: set IDENTITY_PIN_PEPPER (32+ random bytes, base64) in production");
 }
 if (production && process.env.ADMIN_REQUIRE_MFA !== "1") {
   throw new Error("Refusing to start: set ADMIN_REQUIRE_MFA=1 in production (admins must use two-factor sign-in)");
@@ -53,6 +56,7 @@ const app = await buildIdentity({
     support: process.env.SERVICE_TOKEN_SUPPORT,
   },
   face,
+  pins: process.env.IDENTITY_PIN_PEPPER ? new PinHasher(process.env.IDENTITY_PIN_PEPPER) : undefined,
   cipher: process.env.IDENTITY_FIELD_KEY ? new FieldCipher(process.env.IDENTITY_FIELD_KEY) : undefined,
   flags: new FlagsClient(
     process.env.CONFIG_INTERNAL_URL && process.env.SERVICE_TOKEN_IDENTITY

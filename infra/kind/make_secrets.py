@@ -6,6 +6,8 @@ row-only database role for the app and an owner role for migrations. Prints key 
 
   python3 infra/kind/make_secrets.py <namespace> <release> <age-recipients-file>
 """
+import base64
+import hashlib
 import os
 import secrets
 import subprocess
@@ -49,6 +51,8 @@ def tok(*names):
 pub = {"JWT_PUBLIC_KEY": env["JWT_PUBLIC_KEY"]}
 per_service = {
     "identity": {**pub, "JWT_PRIVATE_KEY": env["JWT_PRIVATE_KEY"], "IDENTITY_FIELD_KEY": env["IDENTITY_FIELD_KEY"],
+                 # Older .env files predate the PIN pepper: derive the same stable dev-only value as scripts/dev.ts.
+                 "IDENTITY_PIN_PEPPER": env.get("IDENTITY_PIN_PEPPER") or base64.b64encode(hashlib.sha256((env["JWT_PRIVATE_KEY"] + ":pin-pepper").encode()).digest()).decode(),
                  **tok("identity", "wallet", "trade", "giftcards", "bills", "risk", "support"),
                  "ADMIN_EMAIL": env["ADMIN_EMAIL"], "ADMIN_PASSWORD": env["ADMIN_PASSWORD"]},
     "wallet": {**pub, **tok("wallet", "trade", "giftcards", "bills"), "DEPOSIT_WEBHOOK_SECRET": env["DEPOSIT_WEBHOOK_SECRET"]},

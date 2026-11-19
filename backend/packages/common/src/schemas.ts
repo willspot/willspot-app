@@ -49,3 +49,29 @@ export function parse<T extends z.ZodType>(schema: T, input: unknown): z.infer<T
   }
   return r.data;
 }
+
+/**
+ * Rejects passwords that pass the complexity rule but are still easy to guess
+ * (ASVS 2.1.7): common words with digits/symbols added (Password123, Naija2024!),
+ * the brand name, or the user's own name or email. Returns a message, or null if OK.
+ */
+const COMMON_BASES = [
+  "password", "passw0rd", "pass", "qwerty", "qwertyuiop", "asdfgh", "zxcvbn", "welcome", "letmein", "admin", "administrator", "iloveyou",
+  "abc", "abcdef", "abcd", "monkey", "dragon", "football", "baseball", "sunshine", "princess", "master", "login", "starwars", "secret",
+  "changeme", "default", "test", "testing", "naija", "nigeria", "lagos", "abuja", "jesus", "god", "godisgood", "blessing", "money", "willspot",
+];
+export function weakPasswordReason(password: string, context: { names?: string[]; email?: string; brand?: string } = {}): string | null {
+  const lower = password.toLowerCase();
+  const letters = lower.replace(/[^a-z]/g, "").replace(/0/g, "o");
+  if (COMMON_BASES.includes(letters) || COMMON_BASES.includes(lower.replace(/[^a-z0-9]/g, "").replace(/\d+$/, ""))) {
+    return "That password is too common. Try a phrase only you would know.";
+  }
+  if (/^(.)\1+$/.test(letters) || /(0123|1234|2345|3456|4567|5678|6789)/.test(lower) && letters.length < 4) {
+    return "That password is too easy to guess.";
+  }
+  const personal = [...(context.names ?? []), context.email?.split("@")[0] ?? "", context.brand ?? ""]
+    .map((s) => s.toLowerCase().replace(/[^a-z]/g, ""))
+    .filter((s) => s.length >= 3);
+  if (personal.some((p) => letters.includes(p))) return "Don't use your name, email or our name in your password.";
+  return null;
+}

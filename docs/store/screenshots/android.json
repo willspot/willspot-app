@@ -1,0 +1,15 @@
+{
+  "width": 1080,
+  "height": 1920,
+  "raw": "android-raw",
+  "out": "android",
+  "screens": [
+    {"raw": "home.png", "title": "All your money in one place", "subtitle": "Naira, dollars and crypto, side by side."},
+    {"raw": "buy.png", "title": "Buy crypto at a locked price", "subtitle": "See exactly what you pay before you confirm with your PIN."},
+    {"raw": "markets.png", "title": "Prices in Naira", "subtitle": "Bitcoin, Ethereum and USDT at a glance."},
+    {"raw": "history.png", "title": "Every kobo accounted for", "subtitle": "A clear history, receipts and monthly statements."},
+    {"raw": "lock.png", "title": "Locked with your PIN", "subtitle": "Balances stay hidden when you step away."},
+    {"raw": "home-pcm.png", "title": "Use it your way", "subtitle": "Pidgin, Yorùbá, Hausa and Igbo on the way."},
+    {"raw": "help.png", "title": "Help when you need it", "subtitle": "Quick answers, and our team in the app."}
+  ]
+}

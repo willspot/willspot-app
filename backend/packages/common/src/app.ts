@@ -50,6 +50,10 @@ export async function createApp(service: string, opts: AppOptions = {}): Promise
             level: process.env.LOG_LEVEL ?? "info",
             base: { service },
             mixin: logTraceFields,
+            // Log the path only: query strings can carry personal data (e.g. an admin search for a phone number).
+            serializers: {
+              req: (req: { method?: string; url?: string; id?: string; ip?: string }) => ({ id: req.id, method: req.method, url: req.url?.split("?")[0], remoteAddress: req.ip }),
+            },
             redact: [
               "req.headers.authorization",
               "req.headers.cookie",

@@ -99,20 +99,47 @@ describe("statements", () => {
 });
 
 describe("PDF statements", () => {
-  const hex = (t: string) => Buffer.from(t, "latin1").toString("hex").toUpperCase();
-  /** Page content streams are Flate-compressed; inflate them to search the drawn text. */
+  /** BaseFont names of the fonts used on the first page (subset fonts get a 6-letter prefix). */
+  const pdfFonts = async (pdf: Buffer) => {
+    const { PDFDocument, PDFDict, PDFName } = await import("pdf-lib");
+    const doc = await PDFDocument.load(pdf);
+    const fonts = doc.getPage(0).node.Resources()?.lookup(PDFName.of("Font"), PDFDict);
+    return [...(fonts?.entries() ?? [])].map(([, ref]) => String(doc.context.lookup(ref, PDFDict).get(PDFName.of("BaseFont"))));
+  };
+  /**
+   * The drawn text, read back the way a PDF viewer would: for each page, follow every
+   * "/Font size Tf" to that font's ToUnicode map and decode the glyph ids of each Tj run.
+   */
   const pageText = async (pdf: Buffer) => {
-    const { inflateSync } = await import("node:zlib");
-    const raw = pdf.toString("latin1");
-    let out = "";
-    for (const m of raw.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
-      try {
-        out += inflateSync(Buffer.from(m[1]!, "latin1")).toString("latin1");
-      } catch {
-        // not a Flate stream
+    const { PDFDocument, PDFDict, PDFName, PDFArray, decodePDFRawStream } = await import("pdf-lib");
+    const doc = await PDFDocument.load(pdf);
+    const bytes = (o: unknown) => Buffer.from(decodePDFRawStream(o as Parameters<typeof decodePDFRawStream>[0]).decode()).toString("latin1");
+    const lines: string[] = [];
+    for (const page of doc.getPages()) {
+      const maps = new Map<string, Map<string, string>>();
+      const fonts = page.node.Resources()?.lookup(PDFName.of("Font"), PDFDict);
+      for (const [name, ref] of fonts?.entries() ?? []) {
+        const font = doc.context.lookup(ref, PDFDict);
+        const tu = font.lookup(PDFName.of("ToUnicode"));
+        const m = new Map<string, string>();
+        if (tu) {
+          for (const [, gid, uni] of bytes(tu).matchAll(/<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>/g)) {
+            m.set(gid!.toUpperCase(), Buffer.from(uni!, "hex").swap16().toString("utf16le"));
+          }
+        }
+        maps.set(name.asString(), m);
+      }
+      const c = page.node.Contents();
+      const parts = c instanceof PDFArray ? c.asArray().map((r) => doc.context.lookup(r)) : [c];
+      let current = new Map<string, string>();
+      for (const part of parts) {
+        for (const [, font, hex] of bytes(part).matchAll(/(?:(\/[\w+-]+)\s+[\d.]+\s+Tf)|<([0-9A-Fa-f]+)>\s*Tj/g)) {
+          if (font) current = maps.get(font) ?? new Map();
+          else lines.push(hex!.match(/.{4}/g)!.map((g) => current.get(g.toUpperCase()) ?? "\uFFFD").join(""));
+        }
       }
     }
-    return out.toUpperCase();
+    return lines.join("\n").normalize("NFC");
   };
   it("returns a real A4 PDF with the summary, a reference and safe text", async () => {
     const u = await user({ firstName: "Adébáyọ̀", lastName: "Ọlá 💸" });
@@ -130,9 +157,12 @@ describe("PDF statements", () => {
     expect(doc.getPageCount()).toBe(1);
     expect(doc.getPage(0).getSize()).toEqual({ width: 595.28, height: 841.89 });
     const raw = await pageText(bytes);
-    expect(raw).toContain(hex("Account statement"));
-    expect(raw).toContain(hex("Adebayo Ola ?")); // accents dropped, emoji replaced — no crash
-    expect(raw).toContain(hex("NGN 1,500.75"));
+    expect(raw).toContain("Account statement");
+    expect(raw).toContain("Adébáyọ̀ Ọlá ?".normalize("NFC")); // Yoruba tone marks kept, emoji replaced — no crash
+    expect(raw).toContain("₦1,500.75");
+    expect(raw).not.toContain("\uFFFD");
+    expect(await pdfFonts(bytes)).toEqual(expect.arrayContaining([expect.stringMatching(/NotoSans-Regular/), expect.stringMatching(/NotoSans-Bold/)]));
+    expect(bytes.length).toBeLessThan(120_000); // fonts are subset to the glyphs used
   });
 
   it("paginates long statements and keeps the same reference for the same data", async () => {
@@ -144,11 +174,17 @@ describe("PDF statements", () => {
     const { PDFDocument } = await import("pdf-lib");
     expect((await PDFDocument.load(a.rawPayload)).getPageCount()).toBeGreaterThan(1);
     expect(a.headers["x-statement-ref"]).toBe(b.headers["x-statement-ref"]);
-    expect(await pageText(a.rawPayload)).toContain(hex("Page 2 of"));
+    expect(await pageText(a.rawPayload)).toContain("Page 2 of");
   });
 
-  it("makes any text printable with the built-in fonts", async () => {
-    const { pdfSafe } = await import("../src/statement-pdf.js");
+  it("keeps what the font can draw and replaces the rest", async () => {
+    const { fitToFont, pdfSafe, amt } = await import("../src/statement-pdf.js");
+    const latinOnly = (cp: number) => cp < 0x250 || (cp >= 0x300 && cp < 0x370) || cp === 0x20a6;
+    // ọ (U+1ECD) isn't in this test font, but o + combining dot below is: decomposed, not lost.
+    expect(fitToFont("₦5,000 Ọlá 中文 💸", latinOnly)).toBe("₦5,000 " + "Ọ".normalize("NFD") + "lá ?? ?");
+    expect(amt("-1500.5", "NGN")).toBe("-₦1,500.5");
+    expect(amt("19.35", "USDT")).toBe("USDT 19.35");
+    // Helvetica fallback (font files missing): Latin-1 only.
     expect(pdfSafe("₦5,000 → Ọlá’s “card” — ok • 中文")).toBe("NGN 5,000 -> Ola's \"card\" - ok * ??");
   });
 });

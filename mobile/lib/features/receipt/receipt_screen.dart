@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../core/api.dart';
 import '../../core/app_state.dart';
 import '../../core/money.dart';
 import '../../ui/logo.dart';
@@ -18,16 +17,22 @@ class ReceiptScreen extends StatefulWidget {
 
 class _ReceiptScreenState extends State<ReceiptScreen> {
   Map<String, dynamic>? _r;
-  ApiException? _error;
+  Object? _error;
 
   @override
   void initState() {
     super.initState();
-    AppScope.read(context).api.get('/v1/wallet/transactions/${widget.id}').then((r) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (_error != null) setState(() => _error = null);
+    try {
+      final r = await AppScope.read(context).api.get('/v1/wallet/transactions/${widget.id}');
       if (mounted) setState(() => _r = r);
-    }).catchError((Object e) {
-      if (mounted) setState(() => _error = e is ApiException ? e : null);
-    });
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    }
   }
 
   String _asText(Map<String, dynamic> r, String brand) {
@@ -44,7 +49,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Receipt')),
       body: _error != null
-          ? EmptyState(icon: Icons.receipt_long_outlined, title: "Couldn't load receipt", message: _error!.message)
+          ? ErrorState(error: _error!, title: "Couldn't load receipt", onRetry: _load)
           : r == null
               ? const Center(child: CircularProgressIndicator())
               : ListView(padding: const EdgeInsets.all(20), children: [

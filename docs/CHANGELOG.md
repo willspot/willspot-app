@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.7.0 — 2026-11-19 — Launch readiness: security review, load test, languages, store assets
+- **Security review** (ADR-035, [SECURITY_REVIEW.md](SECURITY_REVIEW.md)) against ASVS 4.0.3 L2 and MASVS v2, with fixes:
+  - password reset by texted code, which doesn't reveal whether an account exists and needs two-factor when it's on;
+  - password change (app and dashboard);
+  - signed-in devices with sign-out;
+  - 14-day idle timeout (`SESSION_IDLE_DAYS`);
+  - signing-key rotation (several public keys accepted);
+  - weak-password checks;
+  - app lock with the PIN after 2 minutes away and on restore, plus a privacy cover in the app switcher;
+  - request logs without query strings;
+  - screen readers can no longer read balances behind the lock;
+  - unused microphone permission removed;
+  - iOS camera purpose text corrected;
+  - contrast fixes.
+- **Transaction PINs** (ADR-036): HMAC-SHA256 with `IDENTITY_PIN_PEPPER` instead of scrypt; old hashes are upgraded on the next correct PIN. PIN check p95 went from 1,890 ms to 3.8 ms under load.
+- **Load test** (ADR-040, [LOAD_TEST.md](LOAD_TEST.md)): `backend/scripts/load.ts` (no AGPL k6) reached 1,590 req/s with no server errors on one laptop. Helm sizes were raised for wallet, trade and gateway, with `UV_THREADPOOL_SIZE=8`.
+- **Languages** (ADR-037, [TRANSLATIONS.md](TRANSLATIONS.md)):
+  - gen-l10n with draft Pidgin, Yorùbá, Hausa and Igbo for Home, tabs, Log in, the app lock, Profile and the error states;
+  - language picker in Profile; follows the phone by default;
+  - drafts are flagged in the app until native speakers review them.
+- **PDF statements** (ADR-038): embedded Noto Sans (OFL), so ₦ and Nigerian names print correctly; tests read the text back through the font's Unicode map.
+- **Accessibility:**
+  - tap-target, label and contrast guideline tests on Home, Log in and Profile;
+  - 200% text size works without overflow (fixed: services row height, balance chips now wrap);
+  - text colours on brand colours are chosen by WCAG contrast.
+- **Offline and empty states:** failed loads say when you're offline and offer **Try again** (home, markets, statements, referrals, notifications, receipts, deposit account). Tapping outside a field closes the keyboard; on iOS the number pad hid "Confirm with PIN".
+- **Store readiness** (ADR-039, [docs/store](store/README.md)):
+  - app icons (iOS; Android legacy plus adaptive/themed) and splash screens (Android 12+ and older; iOS light and dark), generated from the brand files;
+  - Play icon and feature graphic;
+  - 7 Play and 6 App Store screenshots from real emulator and simulator captures;
+  - listing text within the store limits;
+  - draft Play data-safety and Apple privacy-label answers (need counsel's sign-off).
+
 ## 0.6.0 — 2026-11-19 — Phase 6: KYC selfie + liveness, help centre, PDF statements
 - **KYC selfie** (ADR-032):
   - `POST /v1/kyc/selfie` runs liveness, then a face match to the BVN photo, through `FaceVerifier` (Dojah per docs; sandbox default; `FACE_PROVIDER`, `FACE_MATCH_THRESHOLD`);

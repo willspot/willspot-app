@@ -34,6 +34,7 @@ const values: Record<string, string> = {
   SERVICE_TOKEN_SUPPORT: secret(),
   GIFTCARD_CODE_KEY: randomBytes(32).toString("base64"),
   IDENTITY_FIELD_KEY: randomBytes(32).toString("base64"),
+  IDENTITY_PIN_PEPPER: randomBytes(32).toString("base64"),
   DEPOSIT_WEBHOOK_SECRET: secret(),
   ADMIN_PASSWORD: `Adm1n${randomBytes(9).toString("base64url")}`,
   IDENTITY_DATABASE_URL: `${dbBase}/willspot_identity`,

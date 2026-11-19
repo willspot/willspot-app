@@ -1,4 +1,10 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- The camera plugin asks for the microphone, but the selfie camera runs with audio off:
+         drop it so the app never requests a permission it doesn't use (Play data-safety). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
+    <!-- Photos are chosen with the system photo picker on Android 13+, which needs no permission. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion" />
     <application
         android:label="WillSpot"
         android:allowBackup="false"

@@ -31,6 +31,7 @@ import {
   requireService,
   sha256,
   tooMany,
+  weakPasswordReason,
   tx,
   unauthorized,
   uuidSchema,
@@ -42,6 +43,7 @@ import {
   permissionsFor,
   type Db,
   type StepUpScope,
+  PinHasher,
 } from "@willspot/common";
 import { SandboxFaceVerifier, type FaceVerifier, type KycProvider, type OtpSender } from "./providers.js";
 
@@ -57,6 +59,8 @@ export interface IdentityDeps {
   flags?: FlagsClient;
   /** Encrypts TOTP secrets at rest. Required for TOTP endpoints. */
   cipher?: FieldCipher;
+  /** Keyed PIN hashing (IDENTITY_PIN_PEPPER). Without it PINs fall back to scrypt (dev only). */
+  pins?: PinHasher;
   /** Selfie liveness + face match for KYC tier 2 (defaults to the sandbox). */
   face?: FaceVerifier;
   logger?: boolean;
@@ -75,6 +79,9 @@ const OTP_TTL_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_RESEND_SECONDS = 60;
 const REFRESH_TTL_DAYS = 30;
+/** A session unused for this long can't be refreshed (sign in again). */
+const SESSION_IDLE_DAYS = Number(process.env.SESSION_IDLE_DAYS ?? 14);
+const RESET_TTL_MINUTES = 15;
 
 interface UserRow {
   id: string;
@@ -202,6 +209,8 @@ export async function buildIdentity(deps: IdentityDeps) {
       }),
       req.body,
     );
+    const weak = weakPasswordReason(body.password, { names: [body.firstName, body.lastName], email: body.email });
+    if (weak) throw badRequest("weak_password", weak);
     let referredBy: string | null = null;
     const refCode = body.referralCode?.toUpperCase().replace(/[^A-Z0-9]/g, "");
     if (refCode) {
@@ -350,17 +359,17 @@ export async function buildIdentity(deps: IdentityDeps) {
     }
     return tx(db, async (c) => {
       const s = (
-        await c.query<{ id: string; user_id: string; expires_at: Date; revoked_at: Date | null; mfa: boolean }>(
-          "SELECT id, user_id, expires_at, revoked_at, mfa FROM sessions WHERE refresh_hash=$1 FOR UPDATE",
-          [h],
+        await c.query<{ id: string; user_id: string; expires_at: Date; revoked_at: Date | null; mfa: boolean; idle: boolean }>(
+          "SELECT id, user_id, expires_at, revoked_at, mfa, last_used_at < now() - make_interval(days => $2) AS idle FROM sessions WHERE refresh_hash=$1 FOR UPDATE",
+          [h, SESSION_IDLE_DAYS],
         )
       ).rows[0];
       if (!s) throw unauthorized("Session expired");
-      if (s.revoked_at || s.expires_at < new Date()) throw unauthorized("Session expired");
+      if (s.revoked_at || s.expires_at < new Date() || s.idle) throw unauthorized("Session expired");
       const u = (await c.query<UserRow>("SELECT * FROM users WHERE id=$1", [s.user_id])).rows[0]!;
       if (u.status !== "active") throw unauthorized("Session expired");
       const next = randomToken(32);
-      await c.query("UPDATE sessions SET refresh_hash=$2, previous_hash=$3 WHERE id=$1", [s.id, sha256(next), h]);
+      await c.query("UPDATE sessions SET refresh_hash=$2, previous_hash=$3, last_used_at=now() WHERE id=$1", [s.id, sha256(next), h]);
       return tokensFor(u, s.id, next, s.mfa);
     });
   });
@@ -383,17 +392,23 @@ export async function buildIdentity(deps: IdentityDeps) {
     const body = parse(z.object({ pin: pinSchema, password: z.string().min(1).max(128) }), req.body);
     const u = await getUser(currentUser(req).id);
     if (!u || !(await verifySecret(body.password, u.password_hash))) throw unauthorized("Password is incorrect");
-    await db.query("UPDATE users SET pin_hash=$2, pin_failures=0, pin_locked_until=NULL WHERE id=$1", [u.id, await hashSecret(body.pin)]);
+    const pinHash = deps.pins ? deps.pins.hash(u.id, body.pin) : await hashSecret(body.pin);
+    await db.query("UPDATE users SET pin_hash=$2, pin_failures=0, pin_locked_until=NULL WHERE id=$1", [u.id, pinHash]);
     await audit(u.id, u.pin_hash ? "pin.changed" : "pin.set", u.id);
     return { ok: true };
   });
 
   app.post("/v1/me/pin/verify", { preHandler: auth }, async (req) => {
-    const body = parse(z.object({ pin: z.string().regex(/^\d{4}$/), scope: z.enum(["withdraw", "trade", "pay", "delete_account"]) }), req.body);
+    const body = parse(z.object({ pin: z.string().regex(/^\d{4}$/), scope: z.enum(["withdraw", "trade", "pay", "delete_account", "unlock"]) }), req.body);
     const u = await getUser(currentUser(req).id);
     if (!u?.pin_hash) throw badRequest("pin_not_set", "Set a transaction PIN first");
     if (u.pin_locked_until && u.pin_locked_until > new Date()) throw tooMany("PIN locked. Try again later.");
-    if (!(await verifySecret(body.pin, u.pin_hash))) {
+    const check = deps.pins ? await deps.pins.verify(u.id, body.pin, u.pin_hash) : { ok: await verifySecret(body.pin, u.pin_hash), upgrade: false };
+    if (check.ok && check.upgrade && deps.pins) {
+      // Legacy scrypt PIN hash: switch to the keyed hash now that we've seen the right PIN.
+      await db.query("UPDATE users SET pin_hash=$2 WHERE id=$1", [u.id, deps.pins.hash(u.id, body.pin)]);
+    }
+    if (!check.ok) {
       const n = u.pin_failures + 1;
       const lock = n >= MAX_PIN_FAILURES;
       await db.query(
@@ -484,6 +499,115 @@ export async function buildIdentity(deps: IdentityDeps) {
       code: u.referral_code,
       items: rows.rows.map((r) => ({ id: r.id, name: `${r.first_name} ${r.last_name.slice(0, 1)}.`, verified: r.kyc_tier >= 1, joinedAt: r.created_at })),
     };
+  });
+
+  // ---------- Password change and reset; devices (security review, ADR-035) ----------
+
+  async function setPassword(userId: string, password: string, keepSession: string | null) {
+    await db.query("UPDATE users SET password_hash=$2, failed_logins=0, locked_until=NULL WHERE id=$1", [userId, await hashSecret(password)]);
+    // Everyone else is signed out; the user is told by a security notification (outbox via audit).
+    await db.query("UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL AND ($2::uuid IS NULL OR id <> $2)", [userId, keepSession]);
+    await audit(userId, "password.changed", userId);
+  }
+
+  app.post("/v1/me/password", { preHandler: auth }, async (req) => {
+    const b = parse(z.object({ currentPassword: z.string().min(1).max(128), newPassword: passwordSchema }), req.body);
+    const me = currentUser(req);
+    const u = await getUser(me.id);
+    if (!u || !(await verifySecret(b.currentPassword, u.password_hash))) throw unauthorized("Current password is incorrect");
+    if (await verifySecret(b.newPassword, u.password_hash)) throw badRequest("same_password", "Choose a password you haven't used here before");
+    const weak = weakPasswordReason(b.newPassword, { names: [u.first_name, u.last_name], email: u.email });
+    if (weak) throw badRequest("weak_password", weak);
+    await setPassword(u.id, b.newPassword, me.sid);
+    return { ok: true, message: "Password changed. Your other devices were signed out." };
+  });
+
+  /**
+   * Step 1 of a reset. Always answers the same way, whether or not the account exists
+   * (no enumeration). A code is texted to the account's phone when it does.
+   */
+  app.post("/v1/auth/password/forgot", async (req) => {
+    const b = parse(z.object({ email: emailSchema }), req.body);
+    const u = (await db.query<UserRow>("SELECT * FROM users WHERE email=$1 AND status='active'", [b.email])).rows[0];
+    let code: string | undefined;
+    let hash: string | null = null;
+    if (u) {
+      const recent = await db.query("SELECT 1 FROM password_resets WHERE user_id=$1 AND created_at > now() - make_interval(secs => $2)", [u.id, OTP_RESEND_SECONDS]);
+      if (!recent.rowCount) {
+        code = numericCode(6);
+        hash = sha256(`${u.id}:${code}`);
+        await deps.otp.send(u.phone, code);
+      }
+    }
+    const r = await db.query<{ id: string }>(
+      "INSERT INTO password_resets(user_id, code_hash, expires_at) VALUES ($1,$2, now() + make_interval(mins => $3)) RETURNING id",
+      [u && hash ? u.id : null, hash, RESET_TTL_MINUTES],
+    );
+    return {
+      resetId: r.rows[0]!.id,
+      message: "If that email belongs to an account, we've texted a 6-digit code to its phone number.",
+      ...(deps.exposeDevOtp && code ? { devOtp: code } : {}),
+    };
+  });
+
+  /** Step 2. With two-factor sign-in on, an authenticator or recovery code is also needed (SIM-swap protection). */
+  app.post("/v1/auth/password/reset", async (req) => {
+    const b = parse(
+      z.object({ resetId: uuidSchema, code: z.string().regex(/^\d{6}$/), newPassword: passwordSchema, totp: z.string().max(10).optional(), recoveryCode: z.string().max(20).optional() }),
+      req.body,
+    );
+    const invalid = () => badRequest("reset_invalid", "That code is wrong or has expired. Request a new one.");
+    const r = (await db.query<{ id: string; user_id: string | null; code_hash: string | null; attempts: number }>(
+      "SELECT id, user_id, code_hash, attempts FROM password_resets WHERE id=$1 AND consumed_at IS NULL AND expires_at > now()",
+      [b.resetId],
+    )).rows[0];
+    if (!r || !r.user_id || !r.code_hash || r.attempts >= OTP_MAX_ATTEMPTS) throw invalid();
+    if (sha256(`${r.user_id}:${b.code}`) !== r.code_hash) {
+      await db.query("UPDATE password_resets SET attempts = attempts + 1 WHERE id=$1", [r.id]);
+      throw invalid();
+    }
+    const u = (await getUser(r.user_id))!;
+    const weak = weakPasswordReason(b.newPassword, { names: [u.first_name, u.last_name], email: u.email });
+    if (weak) throw badRequest("weak_password", weak);
+    if (u.totp_enabled) {
+      if (b.recoveryCode) {
+        const used = await db.query("UPDATE totp_recovery_codes SET used_at=now() WHERE user_id=$1 AND code_hash=$2 AND used_at IS NULL RETURNING 1", [u.id, sha256(`${u.id}:${normaliseRecovery(b.recoveryCode)}`)]);
+        if (!used.rowCount) throw new AppError(401, "recovery_invalid", "That recovery code is wrong or already used");
+      } else {
+        if (!b.totp) throw new AppError(401, "totp_required", "Two-factor sign-in is on: also enter the code from your authenticator app");
+        const step = verifyTotp(totpSecret(u), b.totp, u.totp_last_step === null ? null : Number(u.totp_last_step));
+        if (step === null) throw new AppError(401, "totp_invalid", "That authenticator code is wrong or already used");
+        await db.query("UPDATE users SET totp_last_step=$2 WHERE id=$1", [u.id, step]);
+      }
+    }
+    await db.query("UPDATE password_resets SET consumed_at=now() WHERE id=$1", [r.id]);
+    await setPassword(u.id, b.newPassword, null);
+    return { ok: true, message: "Password reset. Sign in with your new password." };
+  });
+
+  app.get("/v1/me/sessions", { preHandler: auth }, async (req) => {
+    const me = currentUser(req);
+    const rows = await db.query<{ id: string; user_agent: string | null; created_at: Date; last_used_at: Date; mfa: boolean }>(
+      "SELECT id, user_agent, created_at, last_used_at, mfa FROM sessions WHERE user_id=$1 AND revoked_at IS NULL AND expires_at > now() AND last_used_at > now() - make_interval(days => $2) ORDER BY last_used_at DESC LIMIT 50",
+      [me.id, SESSION_IDLE_DAYS],
+    );
+    return { items: rows.rows.map((s) => ({ id: s.id, device: s.user_agent ?? "Unknown device", signedInAt: s.created_at, lastUsedAt: s.last_used_at, twoFactor: s.mfa, current: s.id === me.sid })) };
+  });
+
+  app.post("/v1/me/sessions/:id/revoke", { preHandler: auth }, async (req) => {
+    const { id } = parse(z.object({ id: uuidSchema }), req.params);
+    const me = currentUser(req);
+    const r = await db.query("UPDATE sessions SET revoked_at=now() WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL", [id, me.id]);
+    if (!r.rowCount) throw notFound("Session not found");
+    await audit(me.id, "session.revoked", me.id, { session: id });
+    return { ok: true };
+  });
+
+  app.post("/v1/me/sessions/revoke-others", { preHandler: auth }, async (req) => {
+    const me = currentUser(req);
+    const r = await db.query("UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND id <> $2 AND revoked_at IS NULL", [me.id, me.sid]);
+    await audit(me.id, "session.revoked_others", me.id, { count: r.rowCount });
+    return { revoked: r.rowCount ?? 0 };
   });
 
   app.post("/v1/me/delete", { preHandler: auth }, async (req) => {

@@ -4,7 +4,7 @@ import { GATEWAY, csrfOk, refresh, tokens } from "@/lib/server";
  * Forwards dashboard calls to the gateway with the admin's bearer token.
  * Only /v1/admin/* and the public config/markets reads are allowed through.
  */
-const ALLOWED = [/^v1\/admin\//, /^v1\/config\/(public|faq)$/, /^v1\/trade\/markets$/, /^v1\/me$/, /^v1\/me\/totp\/(setup|enable|disable)$/];
+const ALLOWED = [/^v1\/admin\//, /^v1\/config\/(public|faq)$/, /^v1\/trade\/markets$/, /^v1\/me$/, /^v1\/me\/totp\/(setup|enable|disable)$/, /^v1\/me\/password$/];
 
 async function forward(req: Request, ctx: { params: Promise<{ path: string[] }> }) {
   const path = (await ctx.params).path.join("/");
