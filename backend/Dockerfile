@@ -22,6 +22,10 @@ ARG SERVICE
 RUN test -n "$SERVICE" && node scripts/build.mjs "$SERVICE"
 
 FROM node:24-alpine AS runtime
+# The services run plain `node`; npm, yarn and corepack aren't needed at runtime and the
+# copies bundled in the base image carry their own CVEs (found by Trivy in CI). Remove them.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-* \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
 ARG SERVICE
 ENV NODE_ENV=production \
     BRAND_SEED_FILE=/app/brand/brand.json \

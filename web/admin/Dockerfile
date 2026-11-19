@@ -12,6 +12,10 @@ COPY web/ web/
 RUN cd web && npm run build -w admin
 
 FROM node:24-alpine AS runtime
+# The services run plain `node`; npm, yarn and corepack aren't needed at runtime and the
+# copies bundled in the base image carry their own CVEs (found by Trivy in CI). Remove them.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-* \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
 ENV NODE_ENV=production PORT=3001 HOSTNAME=0.0.0.0 NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app
 COPY --from=build --chown=node:node /src/web/admin/.next/standalone/ ./
