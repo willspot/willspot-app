@@ -50,6 +50,9 @@ class WillSpotApp extends StatelessWidget {
             // so the keyboard would otherwise cover buttons such as "Confirm with PIN").
             builder: (context, child) => GestureDetector(
               behavior: HitTestBehavior.translucent,
+              // Not a control: keep it out of the accessibility tree, or screen readers
+              // announce one unlabelled button covering the whole app.
+              excludeFromSemantics: true,
               onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
               child: AppLock(child: child ?? const SizedBox()),
             ),

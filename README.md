@@ -80,12 +80,13 @@ Production deployment, secrets, observability, backups and push setup: [docs/DEP
   - `npm audit` (high) finds 0 vulnerabilities, Semgrep with CI's settings is clean, and gitleaks finds no leaks in the changed files (test passwords marked `gitleaks:allow`);
   - the smoke test passes against the running stack;
   - admin dashboard builds; web typecheck passes.
-- **App:** 50 Flutter tests pass and the analyzer is clean. New in `test/phase7_test.dart`:
+- **App:** 51 Flutter tests pass and the analyzer is clean. New in `test/phase7_test.dart`:
   - ARB key and placeholder parity;
   - Home in each language;
   - the language picker;
   - offline state with retry;
   - app lock (including screen-reader hiding; confirmed the test fails without the fix);
+  - tapping outside a field closes the keyboard;
   - forgot password;
   - signed-in devices;
   - tap-target, label and contrast guidelines;

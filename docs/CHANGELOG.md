@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.1 — 2026-11-19 — Fix
+- The tap-outside-to-close-keyboard area showed up to screen readers as one unlabelled button covering the whole app (caught by the accessibility tests in CI). It is now excluded from the accessibility tree, and a test covers the keyboard behaviour.
+
 ## 0.7.0 — 2026-11-19 — Launch readiness: security review, load test, languages, store assets
 - **Security review** (ADR-035, [SECURITY_REVIEW.md](SECURITY_REVIEW.md)) against ASVS 4.0.3 L2 and MASVS v2, with fixes:
   - password reset by texted code, which doesn't reveal whether an account exists and needs two-factor when it's on;

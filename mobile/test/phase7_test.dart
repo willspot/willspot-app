@@ -211,6 +211,17 @@ void main() {
     });
   });
 
+  testWidgets('tapping outside a field closes the keyboard', (tester) async {
+    final state = stateWith({})..user = null;
+    await pumpTall(tester, WillSpotApp(state: state, home: const LoginScreen()));
+    await tester.showKeyboard(find.byType(TextFormField).first);
+    await tester.pump();
+    expect(tester.testTextInput.isVisible, isTrue);
+    await tester.tapAt(const Offset(200, 1500)); // empty space below the form
+    await tester.pump();
+    expect(tester.testTextInput.isVisible, isFalse);
+  });
+
   group('accessibility', () {
     for (final (name, screen) in [('home', const HomeShell() as Widget), ('login', const LoginScreen()), ('profile', const Scaffold(body: ProfileScreen()))]) {
       testWidgets('$name meets tap-target, label and contrast guidelines', (tester) async {
