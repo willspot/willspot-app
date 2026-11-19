@@ -85,7 +85,13 @@ describe("ops", () => {
   it("logs failed webhook calls for the ops page", async () => {
     await app.inject({ method: "POST", url: "/v1/webhooks/deposits", payload: { reference: "bad-sig-001" }, headers: { "x-signature": "nope" } });
     const admin = await issuer.signAccess({ id: randomUUID(), role: "admin", roles: ["super_admin"], tier: 2, sid: "s" });
-    const r = (await app.inject({ method: "GET", url: "/v1/admin/wallet/webhook-failures", headers: { authorization: `Bearer ${admin}` } })).json();
+    // The failure is written in an onResponse hook, i.e. after the reply has gone out (logging must
+    // never slow or change the reply to the bank), so wait for it instead of reading immediately.
+    let r: { items: Record<string, unknown>[] } = { items: [] };
+    for (let i = 0; i < 40 && !r.items.length; i++) {
+      r = (await app.inject({ method: "GET", url: "/v1/admin/wallet/webhook-failures", headers: { authorization: `Bearer ${admin}` } })).json();
+      if (!r.items.length) await new Promise((res) => setTimeout(res, 50));
+    }
     expect(r.items[0]).toMatchObject({ route: "/v1/webhooks/deposits", status: 401, reference: "bad-sig-001" });
   });
 });
