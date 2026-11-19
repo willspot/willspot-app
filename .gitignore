@@ -32,3 +32,6 @@ backend/.nats-data/
 
 # load test output (copy notable runs into docs/)
 backend/load-report.json
+
+# local demo accounts (backend/scripts/seed-demo.ts) — contains passwords
+demo-logins.md
