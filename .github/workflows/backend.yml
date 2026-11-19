@@ -36,10 +36,17 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
-      - name: Install nats-server (event-bus tests)
+      - name: Install nats-server 2.15.3 (event-bus tests; checksum verified)
         run: |
-          curl -sSfL -o /tmp/nats.zip https://github.com/nats-io/nats-server/releases/download/v2.15.3/nats-server-v2.15.3-linux-amd64.zip
-          unzip -q /tmp/nats.zip -d /tmp && sudo mv /tmp/nats-server-v2.15.3-linux-amd64/nats-server /usr/local/bin/
+          v=2.15.3
+          f=nats-server-v$v-linux-amd64.tar.gz
+          base=https://github.com/nats-io/nats-server/releases/download/v$v
+          curl -sSfL -o "/tmp/$f" "$base/$f"
+          curl -sSfL -o /tmp/SHA256SUMS "$base/SHA256SUMS"
+          (cd /tmp && grep " $f\$" SHA256SUMS | sha256sum -c -)
+          mkdir -p /tmp/nats && tar -xzf "/tmp/$f" -C /tmp/nats --strip-components=1
+          sudo install -m 0755 /tmp/nats/nats-server /usr/local/bin/nats-server
+          nats-server --version
       - run: npm run typecheck
       - run: npm test
         env:

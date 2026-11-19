@@ -11,4 +11,6 @@ for (const app of ["site", "admin"]) {
   for (const f of ["logo.svg", "logo-mark.svg"]) cpSync(join(root, "brand", f), join(dir, "public", "brand", f));
   cpSync(join(root, "brand", "brand.json"), join(dir, "src", "brand.json"));
 }
-console.log("brand synced to web/site and web/admin");
+// The Flutter app bundles the same file (mobile CI checks they match).
+cpSync(join(root, "brand", "brand.json"), join(root, "mobile", "assets", "brand.json"));
+console.log("brand synced to web/site, web/admin and mobile/assets");
