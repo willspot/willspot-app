@@ -43,6 +43,7 @@ const app = await buildIdentity({
     giftcards: process.env.SERVICE_TOKEN_GIFTCARDS,
     bills: process.env.SERVICE_TOKEN_BILLS,
     risk: process.env.SERVICE_TOKEN_RISK,
+    support: process.env.SERVICE_TOKEN_SUPPORT,
   },
   cipher: process.env.IDENTITY_FIELD_KEY ? new FieldCipher(process.env.IDENTITY_FIELD_KEY) : undefined,
   flags: new FlagsClient(

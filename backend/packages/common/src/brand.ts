@@ -32,5 +32,9 @@ export const brandSchema = z.object({
 });
 export type Brand = z.infer<typeof brandSchema>;
 
-export const FLAG_NAMES = ["signups", "deposits", "withdrawals", "crypto_trading", "gift_cards", "usd_account", "bill_payments"] as const;
-export const flagsSchema = z.object(Object.fromEntries(FLAG_NAMES.map((f) => [f, z.boolean()])) as Record<(typeof FLAG_NAMES)[number], z.ZodBoolean>);
+export const FLAG_NAMES = ["signups", "deposits", "withdrawals", "crypto_trading", "gift_cards", "usd_account", "bill_payments", "referrals", "support"] as const;
+/** Flags added after launch default to on, so configs saved before they existed stay valid. */
+const LATER_FLAGS = new Set<string>(["referrals", "support"]);
+export const flagsSchema = z.object(
+  Object.fromEntries(FLAG_NAMES.map((f) => [f, LATER_FLAGS.has(f) ? z.boolean().default(true) : z.boolean()])) as Record<(typeof FLAG_NAMES)[number], z.ZodBoolean>,
+);

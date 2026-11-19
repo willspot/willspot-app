@@ -21,6 +21,7 @@ const app = await buildConfig({
     trade: process.env.SERVICE_TOKEN_TRADE,
     giftcards: process.env.SERVICE_TOKEN_GIFTCARDS,
     bills: process.env.SERVICE_TOKEN_BILLS,
+    support: process.env.SERVICE_TOKEN_SUPPORT,
   },
 });
 

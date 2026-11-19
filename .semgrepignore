@@ -1,0 +1,8 @@
+# Helm templates are Go templates, not YAML; helm lint + kubeconform check them (infra.yml).
+infra/helm/willspot/templates/
+# Generated or third-party
+**/node_modules/
+**/dist/
+mobile/build/
+web/site/out/
+web/**/.next/

@@ -18,6 +18,7 @@ const app = await buildGateway({
     bills: env("BILLS_INTERNAL_URL", "http://localhost:4006"),
     risk: env("RISK_INTERNAL_URL", "http://localhost:4007"),
     notifications: env("NOTIFICATIONS_INTERNAL_URL", "http://localhost:4008"),
+    support: env("SUPPORT_INTERNAL_URL", "http://localhost:4009"),
   },
   corsOrigins: env("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001").split(",").map((s) => s.trim()).filter(Boolean),
   redisUrl: process.env.REDIS_URL || undefined,

@@ -1,0 +1,104 @@
+# In-cluster dependencies for the LOCAL test only: Postgres (one server, one database and
+# two roles per service), NATS JetStream and Redis. Production uses managed Postgres per
+# service and a 3-node NATS cluster (docs/DEPLOYMENT.md).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pg-init
+data:
+  10-willspot.sh: |
+    #!/bin/sh
+    # For each service: <svc>_owner owns the database and runs migrations; <svc>_app can
+    # only read and write rows (no DDL). Mirrors the production least-privilege setup.
+    set -eu
+    for svc in identity wallet trade config giftcards bills risk notifications support; do
+      psql -v ON_ERROR_STOP=1 -U postgres <<SQL
+    CREATE ROLE ${svc}_owner LOGIN PASSWORD '${OWNER_PASSWORD}';
+    CREATE ROLE ${svc}_app LOGIN PASSWORD '${APP_PASSWORD}';
+    CREATE ROLE ${svc}_backup LOGIN PASSWORD '${BACKUP_PASSWORD}';
+    CREATE DATABASE willspot_${svc} OWNER ${svc}_owner;
+    SQL
+      psql -v ON_ERROR_STOP=1 -U postgres -d willspot_${svc} <<SQL
+    REVOKE ALL ON DATABASE willspot_${svc} FROM PUBLIC;
+    GRANT CONNECT ON DATABASE willspot_${svc} TO ${svc}_app, ${svc}_backup;
+    REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+    GRANT USAGE ON SCHEMA public TO ${svc}_app, ${svc}_backup;
+    ALTER DEFAULT PRIVILEGES FOR ROLE ${svc}_owner IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${svc}_app;
+    ALTER DEFAULT PRIVILEGES FOR ROLE ${svc}_owner IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${svc}_app;
+    ALTER DEFAULT PRIVILEGES FOR ROLE ${svc}_owner IN SCHEMA public GRANT SELECT ON TABLES TO ${svc}_backup;
+    ALTER DEFAULT PRIVILEGES FOR ROLE ${svc}_owner IN SCHEMA public GRANT SELECT ON SEQUENCES TO ${svc}_backup;
+    SQL
+    done
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata: { labels: { app: postgres } }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - { name: POSTGRES_PASSWORD, valueFrom: { secretKeyRef: { name: deps, key: POSTGRES_PASSWORD } } }
+            - { name: OWNER_PASSWORD, valueFrom: { secretKeyRef: { name: deps, key: OWNER_PASSWORD } } }
+            - { name: APP_PASSWORD, valueFrom: { secretKeyRef: { name: deps, key: APP_PASSWORD } } }
+            - { name: BACKUP_PASSWORD, valueFrom: { secretKeyRef: { name: deps, key: BACKUP_PASSWORD } } }
+          ports: [{ containerPort: 5432 }]
+          readinessProbe: { exec: { command: ["pg_isready", "-U", "postgres"] }, periodSeconds: 3 }
+          volumeMounts:
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+      volumes:
+        - name: init
+          configMap: { name: pg-init, defaultMode: 0755 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: postgres }
+spec: { selector: { app: postgres }, ports: [{ port: 5432 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: nats }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: nats } }
+  template:
+    metadata: { labels: { app: nats } }
+    spec:
+      containers:
+        - name: nats
+          image: nats:2.15-alpine
+          args: ["-js", "-sd", "/data", "-m", "8222"]
+          ports: [{ containerPort: 4222 }]
+          volumeMounts: [{ name: data, mountPath: /data }]
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: nats }
+spec: { selector: { app: nats }, ports: [{ port: 4222 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: redis }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: redis } }
+  template:
+    metadata: { labels: { app: redis } }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports: [{ containerPort: 6379 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: redis }
+spec: { selector: { app: redis }, ports: [{ port: 6379 }] }

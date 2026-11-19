@@ -20,12 +20,13 @@ class _SignupScreenState extends State<SignupScreen> {
   final _email = TextEditingController();
   final _phone = TextEditingController();
   final _password = TextEditingController();
+  final _referral = TextEditingController();
   bool _busy = false;
   bool _obscure = true;
 
   @override
   void dispose() {
-    for (final c in [_first, _last, _email, _phone, _password]) {
+    for (final c in [_first, _last, _email, _phone, _password, _referral]) {
       c.dispose();
     }
     super.dispose();
@@ -41,6 +42,7 @@ class _SignupScreenState extends State<SignupScreen> {
         'email': _email.text.trim(),
         'phone': Validation.normalisePhone(_phone.text),
         'password': _password.text,
+        if (_referral.text.trim().isNotEmpty) 'referralCode': _referral.text.trim(),
       });
       if (!mounted) return;
       Navigator.push(context, fadeRoute(OtpScreen(userId: r['userId'] as String, sentTo: r['otpSentTo'] as String, devOtp: r['devOtp'] as String?)));
@@ -73,6 +75,8 @@ class _SignupScreenState extends State<SignupScreen> {
         validator: Validation.password,
         autofillHints: const [AutofillHints.newPassword],
       ),
+      if (AppScope.of(context).flag('referrals'))
+        TextFormField(controller: _referral, decoration: const InputDecoration(labelText: 'Referral code (optional)', hintText: 'From the friend who invited you'), textCapitalization: TextCapitalization.characters, maxLength: 12),
     ];
     return Scaffold(
       appBar: AppBar(),

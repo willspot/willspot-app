@@ -29,25 +29,44 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: azure/setup-helm@v4
         with:
           version: v4.3.2
+      # Inputs and secrets reach the shell only through env vars, never ${{ }} inside
+      # the script (prevents shell injection from a crafted version string).
+      - name: Check inputs
+        env:
+          VERSION: ${{ inputs.version }}
+          VALUES_FILE: ${{ vars.VALUES_FILE }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "version must look like 1.2.3"; exit 1; }
+          [[ "$VALUES_FILE" =~ ^[A-Za-z0-9_./-]+\.ya?ml$ && -f "$VALUES_FILE" ]] || { echo "VALUES_FILE must be an existing .yaml file in the repo"; exit 1; }
       - name: Kubeconfig
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
         run: |
           mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > ~/.kube/config
+          printf '%s' "$KUBECONFIG_B64" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
       - name: Diff-free dry run first
+        env:
+          VERSION: ${{ inputs.version }}
+          VALUES_FILE: ${{ vars.VALUES_FILE }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           helm upgrade --install willspot infra/helm/willspot --namespace willspot \
-            -f "${{ vars.VALUES_FILE }}" --set image.tag="${{ inputs.version }}" \
-            --set image.registry="ghcr.io/${{ github.repository_owner }}" --dry-run=server > /dev/null
+            -f "$VALUES_FILE" --set image.tag="$VERSION" \
+            --set image.registry="ghcr.io/$OWNER" --dry-run=server > /dev/null
       - name: Deploy (migrations run first; rolls back automatically if anything fails)
+        env:
+          VERSION: ${{ inputs.version }}
+          VALUES_FILE: ${{ vars.VALUES_FILE }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           helm upgrade --install willspot infra/helm/willspot --namespace willspot \
-            -f "${{ vars.VALUES_FILE }}" --set image.tag="${{ inputs.version }}" \
-            --set image.registry="ghcr.io/${{ github.repository_owner }}" \
+            -f "$VALUES_FILE" --set image.tag="$VERSION" \
+            --set image.registry="ghcr.io/$OWNER" \
             --rollback-on-failure --wait --timeout 15m
       - name: Smoke check through the public gateway
         run: |

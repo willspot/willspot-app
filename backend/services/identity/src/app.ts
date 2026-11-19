@@ -87,6 +87,8 @@ interface UserRow {
   totp_enabled: boolean;
   totp_last_step: string | null;
   admin_roles: string[];
+  referral_code: string;
+  referred_by: string | null;
   locked_until: Date | null;
   pin_failures: number;
   pin_locked_until: Date | null;
@@ -104,6 +106,7 @@ const publicUser = (u: UserRow) => ({
   kycTier: u.kyc_tier,
   hasPin: u.pin_hash !== null,
   totpEnabled: u.totp_enabled,
+  referralCode: u.referral_code,
   createdAt: u.created_at,
   ...(u.role === "admin" ? { adminRoles: adminRoles(u), permissions: permissionsFor(adminRoles(u)) } : {}),
 });
@@ -188,21 +191,34 @@ export async function buildIdentity(deps: IdentityDeps) {
         password: passwordSchema,
         firstName: nameSchema,
         lastName: nameSchema,
+        referralCode: z.string().max(20).optional(),
       }),
       req.body,
     );
+    let referredBy: string | null = null;
+    const refCode = body.referralCode?.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (refCode) {
+      const r = await db.query<{ id: string }>("SELECT id FROM users WHERE referral_code=$1 AND role='user' AND status='active'", [refCode]);
+      if (!r.rowCount) throw badRequest("invalid_referral_code", "That referral code doesn't exist. Check it or leave it blank.");
+      referredBy = r.rows[0]!.id;
+    }
     const hash = await hashSecret(body.password);
-    let user: UserRow;
-    try {
-      user = (
-        await db.query<UserRow>(
-          "INSERT INTO users(email, phone, first_name, last_name, password_hash) VALUES ($1,$2,$3,$4,$5) RETURNING *",
-          [body.email, body.phone, body.firstName, body.lastName, hash],
-        )
-      ).rows[0]!;
-    } catch (e) {
-      if ((e as { code?: string }).code === "23505") throw conflict("account_exists", "An account with this email or phone already exists");
-      throw e;
+    let user: UserRow | undefined;
+    for (let attempt = 0; !user; attempt++) {
+      try {
+        user = (
+          await db.query<UserRow>(
+            "INSERT INTO users(email, phone, first_name, last_name, password_hash, referred_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *",
+            [body.email, body.phone, body.firstName, body.lastName, hash, referredBy],
+          )
+        ).rows[0]!;
+      } catch (e) {
+        const err = e as { code?: string; constraint?: string };
+        // A clash on the random referral code is retried; email/phone clashes are real.
+        if (err.code === "23505" && err.constraint === "users_referral_code" && attempt < 3) continue;
+        if (err.code === "23505") throw conflict("account_exists", "An account with this email or phone already exists");
+        throw e;
+      }
     }
     const code = await issueOtp(user, "signup");
     reply.status(201);
@@ -448,6 +464,21 @@ export async function buildIdentity(deps: IdentityDeps) {
     return { recoveryCodes: await newRecoveryCodes(u.id) };
   });
 
+  /** People this user invited (first name and initial only), for the referrals screen. */
+  app.get("/v1/me/referrals", { preHandler: auth }, async (req) => {
+    const me = currentUser(req).id;
+    const u = await getUser(me);
+    if (!u) throw notFound();
+    const rows = await db.query<{ id: string; first_name: string; last_name: string; kyc_tier: number; created_at: Date }>(
+      "SELECT id, first_name, last_name, kyc_tier, created_at FROM users WHERE referred_by=$1 ORDER BY created_at DESC LIMIT 200",
+      [me],
+    );
+    return {
+      code: u.referral_code,
+      items: rows.rows.map((r) => ({ id: r.id, name: `${r.first_name} ${r.last_name.slice(0, 1)}.`, verified: r.kyc_tier >= 1, joinedAt: r.created_at })),
+    };
+  });
+
   app.post("/v1/me/delete", { preHandler: auth }, async (req) => {
     const stepUp = req.headers["x-step-up"];
     const me = currentUser(req);
@@ -649,7 +680,7 @@ export async function buildIdentity(deps: IdentityDeps) {
     const { id } = parse(z.object({ id: uuidSchema }), req.params);
     const u = await getUser(id);
     if (!u) throw notFound();
-    return { id: u.id, status: u.status, kycTier: u.kyc_tier, firstName: u.first_name, lastName: u.last_name, email: u.email, phone: u.phone };
+    return { id: u.id, status: u.status, kycTier: u.kyc_tier, firstName: u.first_name, lastName: u.last_name, email: u.email, phone: u.phone, referredBy: u.referred_by };
   });
 
   return app;

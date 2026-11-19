@@ -8,7 +8,9 @@ export type FlagName =
   | "gift_cards"
   | "usd_account"
   | "bill_payments"
-  | "signups";
+  | "signups"
+  | "referrals"
+  | "support";
 
 /**
  * Server-side feature flags, read from the config service and cached for 30s.

@@ -27,6 +27,8 @@
     "crypto_trading": true,
     "gift_cards": true,
     "usd_account": true,
-    "bill_payments": true
+    "bill_payments": true,
+    "referrals": true,
+    "support": true
   }
 }

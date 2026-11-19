@@ -17,6 +17,7 @@ scrape_configs:
           - bills:9464
           - risk:9464
           - notifications:9464
+          - support:9464
     relabel_configs:
       - source_labels: [__address__]
         regex: "([^:]+):.*"

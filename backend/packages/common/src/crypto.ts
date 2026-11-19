@@ -4,6 +4,8 @@ import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, 
  * Field encryption (AES-256-GCM) for secrets the business must read back later,
  * e.g. gift-card codes. Key: 32 random bytes, base64. Output: v1.<iv>.<tag>.<ciphertext>.
  */
+const GCM_TAG_BYTES = 16;
+
 export class FieldCipher {
   private readonly key: Buffer;
   constructor(keyB64: string) {
@@ -12,15 +14,19 @@ export class FieldCipher {
   }
   encrypt(plain: string): string {
     const iv = randomBytes(12);
-    const c = createCipheriv("aes-256-gcm", this.key, iv);
+    const c = createCipheriv("aes-256-gcm", this.key, iv, { authTagLength: GCM_TAG_BYTES });
     const ct = Buffer.concat([c.update(plain, "utf8"), c.final()]);
     return ["v1", iv.toString("base64url"), c.getAuthTag().toString("base64url"), ct.toString("base64url")].join(".");
   }
   decrypt(blob: string): string {
     const [v, iv, tag, ct] = blob.split(".");
     if (v !== "v1" || !iv || !tag || !ct) throw new Error("bad ciphertext");
-    const d = createDecipheriv("aes-256-gcm", this.key, Buffer.from(iv, "base64url"));
-    d.setAuthTag(Buffer.from(tag, "base64url"));
+    // Pin the tag length: without it Node accepts truncated tags (down to 4 bytes),
+    // which makes forging a ciphertext far easier (Semgrep gcm-no-tag-length).
+    const t = Buffer.from(tag, "base64url");
+    if (t.length !== GCM_TAG_BYTES) throw new Error("bad ciphertext");
+    const d = createDecipheriv("aes-256-gcm", this.key, Buffer.from(iv, "base64url"), { authTagLength: GCM_TAG_BYTES });
+    d.setAuthTag(t);
     return Buffer.concat([d.update(Buffer.from(ct, "base64url")), d.final()]).toString("utf8");
   }
 }

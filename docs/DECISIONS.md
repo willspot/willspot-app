@@ -93,3 +93,15 @@ Traces use the OpenTelemetry SDK 2.x line (pinned; the 3.x line was days old) wi
 
 ## ADR-027 — Encrypted logical backups with automated restore drills (2026-11-17)
 Daily `pg_dump -Fc` per database, encrypted with age to public keys (the backup job can't decrypt). Uploads go to an in-country S3-compatible bucket with SHA-256 manifests. A weekly drill restores into scratch databases and checks ledger invariants. A backup that has never been restored doesn't count. Point-in-time recovery from the managed database is recommended on top for an RPO under 24 h.
+
+## ADR-028 — Referral rewards are event-driven and paid once per referee (2026-11-19)
+Identity records who referred whom. The link is set only at sign-up, and each user gets an 8-character code with no look-alike characters. The wallet listens for `wallet.deposit_received`. When a referred person who has verified their BVN and is active makes a Naira deposit of at least the minimum, the referrer gets the reward. It is paid from `sys:marketing:NGN`, with one reward per referee (primary key and journal idempotency key), a monthly cap per referrer (serialised by an advisory lock) and the `referrals` feature flag. Amounts come from env and are recorded in the ledger, so the books still balance.
+
+## ADR-029 — Statements computed from the ledger (2026-11-19)
+Statements are built from postings: the opening balance before the period, each movement with a running balance, and the closing balance. They therefore always match balances. Periods use Lagos days (UTC+1, no DST), cover at most a year, and are capped at 5,000 lines. CSV exports keep debit and credit as non-negative columns, so the CSV-injection guard never alters numbers. Staff with `money.read` can export a customer's statement.
+
+## ADR-030 — Support tickets as their own service (2026-11-19)
+Tickets and messages live in a separate `support` service and database (port 4009). Customers see only their own tickets and never internal notes. Staff replies and resolutions notify the customer through the outbox and event bus. Customers can have at most 5 open tickets and send 30 messages per hour. Customers see staff by first name only. The service has a new `support.manage` permission (support role and super admin) and its own `support` feature flag.
+
+## ADR-031 — CI security scanning on a private repository (2026-11-19)
+CodeQL's licence allows free use only on open-source code, so it is off by default (repository variable `CODEQL_ENABLED`) until the repo is public or GitHub Advanced Security is bought. Semgrep CE with registry rules, which are licensed for internal use, is the default static analysis and fails on ERROR findings. Secret scanning runs the gitleaks CLI over full history. The gitleaks GitHub Action failed on the first push, because it asked git for the parent of the root commit. Workflow inputs reach shell scripts only through env vars.

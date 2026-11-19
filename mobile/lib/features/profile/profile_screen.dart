@@ -8,7 +8,10 @@ import '../auth/set_pin_screen.dart';
 import '../common/pin_sheet.dart';
 import '../kyc/kyc_screen.dart';
 import '../notifications/notification_settings_screen.dart';
+import '../referrals/referrals_screen.dart';
 import '../security/two_factor_screen.dart';
+import '../statements/statement_screen.dart';
+import '../support/support_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -76,6 +79,14 @@ class ProfileScreen extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         Card(
+          child: Column(children: [
+            tile(Icons.description_outlined, 'Statements', subtitle: 'Monthly, from your ledger', onTap: () => Navigator.push(context, fadeRoute(const StatementScreen()))),
+            if (state.flag('referrals'))
+              tile(Icons.card_giftcard_outlined, 'Invite friends', subtitle: u['referralCode'] == null ? null : 'Your code: ${u['referralCode']}', onTap: () => Navigator.push(context, fadeRoute(const ReferralsScreen()))),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        Card(
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -95,7 +106,7 @@ class ProfileScreen extends StatelessWidget {
         const SizedBox(height: 16),
         Card(
           child: Column(children: [
-            tile(Icons.support_agent_outlined, 'Help & support', subtitle: state.brand.supportEmail),
+            tile(Icons.support_agent_outlined, 'Help & support', subtitle: state.flag('support') ? 'Chat with our team' : state.brand.supportEmail, onTap: state.flag('support') ? () => Navigator.push(context, fadeRoute(const SupportScreen())) : null),
             tile(Icons.logout_rounded, 'Log out', onTap: () => state.logout()),
             tile(Icons.delete_forever_outlined, 'Close account', color: cs.error, onTap: () => _delete(context)),
           ]),

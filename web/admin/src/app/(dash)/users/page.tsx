@@ -13,6 +13,15 @@ export default function Users() {
   const toast = useToast();
   const canSuspend = useCan("users.suspend");
   const canReset2fa = useCan("users.reset_2fa");
+  const canMoney = useCan("money.read");
+
+  /** Last 30 days as CSV (Lagos dates), e.g. for a dispute or a customer's visa application. */
+  function statementUrl(u: User) {
+    const day = (d: Date) => new Date(d.getTime() + 3600_000).toISOString().slice(0, 10);
+    const to = new Date();
+    const from = new Date(to.getTime() - 29 * 86_400_000);
+    return `/api/gw/v1/admin/wallet/users/${u.id}/statement?from=${day(from)}&to=${day(to)}&format=csv`;
+  }
 
   async function reset2fa(u: User) {
     const reason = prompt(`Reset two-factor sign-in for ${u.email}?\n\nOnly do this after confirming who they are (e.g. ID check on a call). They will be signed out everywhere.\n\nReason (at least 10 characters):`);
@@ -60,6 +69,7 @@ export default function Users() {
                 <td><Status s={u.status} /></td>
                 <td>{when(u.createdAt)}</td>
                 <td style={{ display: "flex", gap: 6 }}>
+                  {canMoney && u.role === "user" && <a className="btn secondary" href={statementUrl(u)} download>Statement</a>}
                   {canReset2fa && u.role === "user" && u.totpEnabled && <button className="btn secondary" onClick={() => reset2fa(u)}>Reset 2FA</button>}
                   {canSuspend && u.role === "user" && u.status === "active" && <button className="btn danger" onClick={() => setStatus(u, "suspended")}>Suspend</button>}
                   {canSuspend && u.role === "user" && u.status === "suspended" && <button className="btn secondary" onClick={() => setStatus(u, "active")}>Reactivate</button>}

@@ -11,6 +11,7 @@ import { api } from "@/lib/api";
 const NAV: readonly (readonly [string, string, string | null])[] = [
   ["/", "Overview", null],
   ["/users", "Users", "users.read"],
+  ["/support", "Support", "support.manage"],
   ["/kyc", "KYC review", "kyc.review"],
   ["/transactions", "Ledger", "money.read"],
   ["/withdrawals", "Withdrawals", "money.read"],
@@ -144,11 +145,16 @@ export function Status({ s }: { s: string }) {
   return <span className={`badge ${cls}`}>{s}</span>;
 }
 
-export function useLoad<T>(path: string, deps: unknown[] = []) {
+/** Loads `path` (null = nothing to load yet) and reloads on demand. */
+export function useLoad<T>(path: string | null, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
+    if (path === null) {
+      setData(null);
+      return;
+    }
     api<T>(path)
       .then((d) => {
         setData(d);

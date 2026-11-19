@@ -1,4 +1,4 @@
-import { FlagsClient, OpsNotifier, RiskClient, callInternal, createPool, every, loadVerifier, busFromEnv, loadSecretFiles, migrateOnlyAndExit, serve, startOutboxRelay } from "@willspot/common";
+import { FlagsClient, OpsNotifier, RiskClient, callInternal, createPool, every, loadVerifier, busFromEnv, toMinor, loadSecretFiles, migrateOnlyAndExit, serve, startOutboxRelay } from "@willspot/common";
 import { runOpsChecks, settleProcessingPayouts } from "./ops.js";
 import { buildWallet, type UserInfo, MIGRATIONS } from "./app.js";
 import { PaystackBankProvider, SandboxBankProvider, type BankProvider } from "./providers.js";
@@ -36,6 +36,11 @@ const app = await buildWallet({
   riskUsdNgn: Number(process.env.RISK_USD_NGN ?? 1500),
   webhookSecret: env("DEPOSIT_WEBHOOK_SECRET"),
   sandbox,
+  referrals: {
+    rewardMinor: toMinor(env("REFERRAL_REWARD_NGN", "1000"), "NGN"),
+    minDepositMinor: toMinor(env("REFERRAL_MIN_DEPOSIT_NGN", "5000"), "NGN"),
+    monthlyCap: Number(env("REFERRAL_MONTHLY_CAP", "50")),
+  },
   serviceTokens: { trade: process.env.SERVICE_TOKEN_TRADE, giftcards: process.env.SERVICE_TOKEN_GIFTCARDS, bills: process.env.SERVICE_TOKEN_BILLS },
 });
 
@@ -47,6 +52,8 @@ every(15 * 60_000, () => runOpsChecks(walletDb, ops), (e) => app.log.error({ err
 // Publish committed outbox events (ADR-021). Without NATS_URL they wait in the outbox.
 const bus = await busFromEnv("wallet", (m, e) => app.log.warn({ err: e }, m));
 const stopRelay = bus ? startOutboxRelay(walletDb, bus, "wallet", (e) => app.log.error({ err: e }, "outbox relay failed")) : undefined;
+// Referral rewards react to deposits (including this service's own events, via the bus).
+if (bus) await bus.subscribe("wallet-referrals", async (e) => void (await app.onReferralEvent(e)), ["wallet.deposit_received"]);
 
 await serve(app, {
   port: Number(env("PORT", "4002")),

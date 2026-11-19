@@ -29,8 +29,11 @@ export type EventHandler = (e: DomainEvent) => Promise<void>;
 
 export interface EventBus {
   publish(e: DomainEvent): Promise<void>;
-  /** Durable subscription: `name` keeps its position across restarts and is shared by replicas. */
-  subscribe(name: string, handler: EventHandler): Promise<void>;
+  /**
+   * Durable subscription: `name` keeps its position across restarts and is shared by replicas.
+   * `types` limits delivery to those event types (e.g. ["wallet.deposit_received"]).
+   */
+  subscribe(name: string, handler: EventHandler, types?: string[]): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -69,12 +72,13 @@ export class NatsBus implements EventBus {
     await this.js.publish(subjectFor(e.type), JSON.stringify(e), { msgID: e.id });
   }
 
-  async subscribe(name: string, handler: EventHandler) {
+  async subscribe(name: string, handler: EventHandler, types?: string[]) {
     const jsm = await jetstreamManager(this.nc);
+    const filter = types?.length ? { filter_subjects: types.map(subjectFor) } : {};
     try {
       await jsm.consumers.info(STREAM, name);
     } catch {
-      await jsm.consumers.add(STREAM, { durable_name: name, ack_policy: AckPolicy.Explicit, deliver_policy: DeliverPolicy.All, max_deliver: 10, ack_wait: 30 * 1e9 });
+      await jsm.consumers.add(STREAM, { durable_name: name, ack_policy: AckPolicy.Explicit, deliver_policy: DeliverPolicy.All, max_deliver: 10, ack_wait: 30 * 1e9, ...filter });
     }
     const consumer = await this.js.consumers.get(STREAM, name);
     const messages = await consumer.consume();
@@ -109,13 +113,13 @@ export class NatsBus implements EventBus {
 /** In-process bus for tests and single-process development. Same at-least-once contract. */
 export class MemoryBus implements EventBus {
   readonly events: DomainEvent[] = [];
-  private handlers: EventHandler[] = [];
+  private handlers: { handler: EventHandler; types?: string[] }[] = [];
   async publish(e: DomainEvent) {
     this.events.push(e);
-    for (const h of this.handlers) await h(e);
+    for (const h of this.handlers) if (!h.types || h.types.includes(e.type)) await h.handler(e);
   }
-  async subscribe(_name: string, handler: EventHandler) {
-    this.handlers.push(handler);
+  async subscribe(_name: string, handler: EventHandler, types?: string[]) {
+    this.handlers.push({ handler, types });
   }
   async close() {}
 }

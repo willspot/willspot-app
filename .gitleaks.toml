@@ -1,0 +1,12 @@
+# gitleaks config: the default rules plus one narrow exception.
+[extend]
+useDefault = true
+
+# backend/.env.example holds placeholder keys ("-----BEGIN PRIVATE KEY-----\nREPLACE_ME…").
+# Both conditions must hold (AND), so a real key pasted into that file is still reported.
+[[allowlists]]
+description = "Placeholders in the example env file"
+condition = "AND"
+paths = ['''^backend/\.env\.example$''']
+regexTarget = "match"
+regexes = ['''REPLACE_ME''']

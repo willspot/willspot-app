@@ -174,6 +174,46 @@ if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
     check("metrics: request histogram exported", /http_server_request_duration_seconds_bucket\{[^}]*service="gateway"/.test(m), m.slice(0, 200));
   }
   check("edge: /metrics is not routed publicly", (await call("GET", "/metrics")).status === 404);
+
+  // ---------- Statements, referrals, support ----------
+  const today = new Date(Date.now() + 3600_000).toISOString().slice(0, 10);
+  const stmt = await call("GET", `/v1/wallet/statements?from=${today}&to=${today}`, undefined, token);
+  const bal2 = (await call("GET", "/v1/wallet/balances", undefined, token)).json.balances.find((b: { asset: string }) => b.asset === "NGN").balance;
+  check("statement: closing balance equals the wallet balance", stmt.json.closingBalance === bal2 && stmt.json.lines.length >= 5, { closing: stmt.json.closingBalance, bal2 });
+
+  const myCode = (await call("GET", "/v1/me", undefined, token)).json.referralCode as string;
+  const fPhone = `080${randomInt(10_000_000, 99_999_999)}`;
+  const fsu = await call("POST", "/v1/auth/signup", { email: `friend+${randomUUID().slice(0, 8)}@example.com`, phone: fPhone, password: "SmokeTest123", firstName: "Friend", lastName: "Invited", referralCode: myCode.toLowerCase() });
+  check("referrals: friend signs up with the code", fsu.status === 201, fsu.json);
+  const fv = (await call("POST", "/v1/auth/verify-otp", { userId: fsu.json.userId, code: fsu.json.devOtp })).json;
+  await call("POST", "/v1/kyc/bvn", { bvn: "22233344466", dob: "1996-06-06" }, fv.accessToken);
+  const ft = (await call("POST", "/v1/auth/refresh", { refreshToken: fv.refreshToken })).json.accessToken as string;
+  await call("GET", "/v1/wallet/virtual-account", undefined, ft);
+  const before = Number(bal2);
+  await call("POST", "/v1/sandbox/deposits", { amount: "6000" }, ft);
+  let refs: Record<string, any> = {};
+  for (let i = 0; i < 30 && !(refs.rewards?.length); i++) {
+    refs = (await call("GET", "/v1/wallet/referrals", undefined, token)).json;
+    if (!refs.rewards?.length) await new Promise((r) => setTimeout(r, 500));
+  }
+  const after = Number((await call("GET", "/v1/wallet/balances", undefined, token)).json.balances.find((b: { asset: string }) => b.asset === "NGN").balance);
+  check("referrals: reward paid via the event bus after the friend's deposit", refs.rewards?.length === 1 && after - before === Number(refs.program.reward), { refs, before, after });
+  check("referrals: friend listed by first name and initial", (await call("GET", "/v1/me/referrals", undefined, token)).json.items?.[0]?.name === "Friend I.");
+
+  const tk = await call("POST", "/v1/support/tickets", { subject: "Smoke test question", category: "deposit", message: "Where is my money?" }, token);
+  check("support: customer opens a request", tk.status === 201, tk.json);
+  check("support: staff reply", (await call("POST", `/v1/admin/support/tickets/${tk.json.id}/messages`, { message: "It has arrived." }, at)).status === 201);
+  const thread = (await call("GET", `/v1/support/tickets/${tk.json.id}`, undefined, token)).json;
+  check("support: customer sees the reply", thread.messages?.length === 2 && thread.ticket?.status === "awaiting_customer", thread);
+  let inbox2: Record<string, any> = {};
+  for (let i = 0; i < 30; i++) {
+    inbox2 = (await call("GET", "/v1/notifications", undefined, token)).json;
+    const t2 = new Set((inbox2.items ?? []).map((n: { type: string }) => n.type));
+    if (t2.has("support.staff_replied") && t2.has("wallet.referral_reward")) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const t2 = new Set((inbox2.items ?? []).map((n: { type: string }) => n.type));
+  check("notifications: referral reward and support reply reached the inbox", t2.has("support.staff_replied") && t2.has("wallet.referral_reward"), [...t2]);
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll smoke checks passed");

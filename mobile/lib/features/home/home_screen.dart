@@ -14,6 +14,8 @@ import '../receipt/receipt_screen.dart';
 import '../wallet/usd_account_screen.dart';
 import '../kyc/kyc_screen.dart';
 import '../notifications/inbox_screen.dart';
+import '../referrals/referrals_screen.dart';
+import '../support/support_screen.dart';
 import '../security/two_factor_screen.dart';
 import '../trade/trade_screen.dart';
 import '../wallet/deposit_screen.dart';
@@ -75,6 +77,10 @@ class HomeScreenState extends State<HomeScreen> {
         _open(const GiftCardsScreen());
       case 'bills':
         _open(const BillsScreen());
+      case 'support':
+        _open(const SupportScreen());
+      case 'referrals':
+        _open(const ReferralsScreen());
     }
   }
 

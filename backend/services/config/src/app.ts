@@ -45,7 +45,7 @@ export async function buildConfig(deps: ConfigDeps) {
   const load = async () => {
     const r = await db.query<{ key: string; value: object; version: number; updated_at: Date }>("SELECT key, value, version, updated_at FROM config_docs");
     const by = Object.fromEntries(r.rows.map((x) => [x.key, x]));
-    return { brand: by.brand!.value, flags: by.flags!.value as Record<string, boolean>, version: `${by.brand!.version}.${by.flags!.version}` };
+    return { brand: by.brand!.value, flags: parse(flagsSchema, by.flags!.value) as Record<string, boolean>, version: `${by.brand!.version}.${by.flags!.version}` };
   };
 
   /** Public, cacheable: the apps and website read branding and flags from here at startup. */

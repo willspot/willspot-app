@@ -31,6 +31,9 @@ Mapped to OWASP ASVS 4.0 (backend/web) and MASVS 2 (mobile) categories. Category
 | Least-privilege runtime | Per-service Secret, row-only DB role for pods, schema owner only in the migration Job, read-only backup role; NetworkPolicy default-deny with per-caller allow-lists; no service-account tokens; seccomp RuntimeDefault | Chart validated, **not run on a cluster** |
 | Backups | age-encrypted (job holds public key only), SHA-256 manifest, restore drill checks ledger invariants; refuses unencrypted output | Tested locally (incl. tamper detection) |
 | Observability without leaks | Auth/cookie/step-up/service-token headers redacted in logs; collector drops auth headers; edge ignores client trace headers; metrics port never routed publicly | Tested (smoke: `/metrics` 404 at the edge) |
+| CI security | gitleaks over full history (narrow allowlist for `.env.example` placeholders, tested both ways); Semgrep CE fails on ERROR findings; npm audit; CodeQL gated (licence); workflow inputs passed via env, never interpolated into shell | Run locally: all clean |
+| Field encryption | AES-256-GCM with the tag length pinned to 16 bytes (Node otherwise accepts truncated tags) | Tested (truncated tag rejected) — found by Semgrep |
+| Support desk | Customers see only their tickets; internal notes never leave staff views; staff shown by first name; limits on open tickets and message rate; app warns never to share PIN/password/codes | Tested |
 | Admin web | Tokens only in httpOnly SameSite=Strict cookies; CSRF header on mutations; proxy allow-list; CSP, frame-ancestors none, no-referrer, noindex | Manually verified with curl |
 
 ## Mobile (MASVS)

@@ -31,6 +31,7 @@ const values: Record<string, string> = {
   SERVICE_TOKEN_GIFTCARDS: secret(),
   SERVICE_TOKEN_BILLS: secret(),
   SERVICE_TOKEN_RISK: secret(),
+  SERVICE_TOKEN_SUPPORT: secret(),
   GIFTCARD_CODE_KEY: randomBytes(32).toString("base64"),
   IDENTITY_FIELD_KEY: randomBytes(32).toString("base64"),
   DEPOSIT_WEBHOOK_SECRET: secret(),
@@ -43,6 +44,7 @@ const values: Record<string, string> = {
   BILLS_DATABASE_URL: `${dbBase}/willspot_bills`,
   RISK_DATABASE_URL: `${dbBase}/willspot_risk`,
   NOTIFICATIONS_DATABASE_URL: `${dbBase}/willspot_notifications`,
+  SUPPORT_DATABASE_URL: `${dbBase}/willspot_support`,
 };
 const env = example
   .split("\n")

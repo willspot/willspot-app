@@ -11,7 +11,7 @@ const ROLE_HELP: Record<string, string> = {
   super_admin: "Everything, including managing staff",
   compliance: "KYC, risk & AML, suspensions, gift-card review, audit log",
   finance: "Money views, rates and fees, gift-card review, operations",
-  support: "Look up customers and transactions, reset a customer's 2FA",
+  support: "Answer support requests, look up customers and transactions, reset a customer's 2FA",
   operations: "Operations health, branding and feature flags",
 };
 

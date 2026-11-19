@@ -55,6 +55,12 @@ export function render(e: DomainEvent, brand = "WillSpot"): Rendered | null {
       return { category: "money", title: "Payment successful", body: `${money(d.amountMinor, "NGN")} paid for ${str(d.customerId)}${d.token ? `. Token: ${str(d.token)}` : "."}`, data: link("bills", d.paymentId) };
     case "bills.payment_failed":
       return { category: "money", title: "Payment failed", body: `Your ${money(d.amountMinor, "NGN")} payment didn't go through and has been refunded.`, data: link("bills", d.paymentId) };
+    case "wallet.referral_reward":
+      return { category: "money", title: "You earned a referral reward", body: `${money(d.amountMinor, "NGN")} is in your wallet: a friend you invited made their first deposit.`, data: link("referrals") };
+    case "support.staff_replied":
+      return { category: "account", title: "Support replied", body: `New reply on request #${str(d.number)}: ${str(d.subject).slice(0, 60)}`, data: link("support", d.ticketId) };
+    case "support.resolved":
+      return { category: "account", title: "Request resolved", body: `We've marked request #${str(d.number)} as resolved. Reply if you still need help.`, data: link("support", d.ticketId) };
     case "identity.kyc_approved":
       return { category: "account", title: "Verification approved", body: "Your identity check was approved. Higher limits are now on.", data: link("verification") };
     case "identity.kyc_rejected":

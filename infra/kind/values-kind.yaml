@@ -1,0 +1,43 @@
+# Helm values for the local kind cluster. Development settings so the smoke test can run
+# (sandbox providers, OTP shown in responses, admin 2FA optional). NOT for production.
+image:
+  registry: docker.io/library # local images willspot-<service>:dev, loaded with "kind load"
+  tag: dev
+  pullPolicy: IfNotPresent
+config:
+  NODE_ENV: development
+  DEPLOY_ENV: kind
+  ADMIN_REQUIRE_MFA: "0"
+  EXPOSE_DEV_OTP: "1"
+  OTP_MODE: sandbox
+  KYC_PROVIDER: sandbox
+  BANK_PROVIDER: sandbox
+  BILL_PROVIDER: sandbox
+  PUSH_PROVIDER: sandbox
+  CORS_ORIGINS: http://localhost:3001
+  NATS_URL: nats://nats:4222
+  REDIS_URL: redis://redis:6379
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+ingress:
+  enabled: false              # reach the gateway with kubectl port-forward
+networkPolicy:
+  enabled: true
+topologySpread: false
+backup:
+  enabled: true
+  image: { repository: willspot-backup, tag: dev }
+admin:
+  image: { repository: willspot-admin, tag: dev }
+  replicas: 1
+# One replica each (laptop-sized); wallet and gateway run two to test zero-downtime rollouts.
+services:
+  gateway: { replicas: 2, autoscaling: { enabled: false } }
+  identity: { replicas: 1, autoscaling: { enabled: false } }
+  wallet: { replicas: 2, autoscaling: { enabled: false } }
+  trade: { replicas: 1, autoscaling: { enabled: false } }
+  config: { replicas: 1, autoscaling: { enabled: false } }
+  giftcards: { replicas: 1, autoscaling: { enabled: false } }
+  bills: { replicas: 1, autoscaling: { enabled: false } }
+  risk: { replicas: 1, autoscaling: { enabled: false } }
+  notifications: { replicas: 1, autoscaling: { enabled: false } }
+  support: { replicas: 1, autoscaling: { enabled: false } }

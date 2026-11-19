@@ -7,5 +7,7 @@ node_modules
 **/dist
 **/.next
 mobile
-web
+# web/ is needed by web/admin/Dockerfile; only its build outputs are excluded
+web/site/out
+**/*.tsbuildinfo
 .git

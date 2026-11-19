@@ -16,7 +16,7 @@ beforeAll(async () => {
   const addr = upstream.server.address() as { port: number };
   const url = `http://127.0.0.1:${addr.port}`;
   gw = await buildGateway({
-    upstreams: { identity: url, wallet: url, trade: url, config: url, giftcards: url, bills: url, risk: url, notifications: url },
+    upstreams: { identity: url, wallet: url, trade: url, config: url, giftcards: url, bills: url, risk: url, notifications: url, support: url },
     corsOrigins: ["https://app.willspot.test"],
     rateLimit: { general: 1000, strict: 3 },
     logger: false,
@@ -65,5 +65,41 @@ describe("gateway", () => {
     for (let i = 0; i < 5; i++) codes.push((await gw.inject({ method: "POST", url: "/v1/auth/login", payload: {}, remoteAddress: "10.0.0.9" })).statusCode);
     expect(codes.slice(0, 3)).toEqual([200, 200, 200]);
     expect(codes[4]).toBe(429);
+  });
+});
+
+describe("gateway retries on dropped connections", () => {
+  it("retries a GET on another connection when the upstream drops it, but never a POST", async () => {
+    const { createServer } = await import("node:http");
+    let gets = 0;
+    let posts = 0;
+    // First GET and every POST: the socket is destroyed mid-request, like a pod shutting down.
+    const flaky = createServer((req, res) => {
+      if (req.method === "POST") {
+        posts++;
+        req.socket.destroy();
+        return;
+      }
+      if (++gets === 1) {
+        req.socket.destroy();
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
+    });
+    await new Promise<void>((r) => flaky.listen(0, "127.0.0.1", () => r()));
+    const url = `http://127.0.0.1:${(flaky.address() as { port: number }).port}`;
+    const g = await buildGateway({
+      upstreams: { identity: url, wallet: url, trade: url, config: url, giftcards: url, bills: url, risk: url, notifications: url, support: url },
+      corsOrigins: [],
+      logger: false,
+    });
+    const r = await g.inject({ method: "GET", url: "/v1/wallet/banks" });
+    expect(r.statusCode).toBe(200);
+    expect(gets).toBe(2);
+    const p = await g.inject({ method: "POST", url: "/v1/wallet/withdrawals", payload: { amount: "1" } });
+    expect(p.statusCode).toBeGreaterThanOrEqual(500);
+    expect(posts).toBe(1); // a request that might move money is not repeated
+    await g.close();
+    flaky.close();
   });
 });

@@ -4,6 +4,7 @@ import '../../core/app_state.dart';
 import '../../ui/motion.dart';
 import '../../ui/widgets.dart';
 import '../home/home_screen.dart';
+import '../statements/statement_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -48,7 +49,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
       child: RefreshIndicator(
         onRefresh: _load,
         child: ListView(padding: const EdgeInsets.all(20), children: [
-          Text('History', style: Theme.of(context).textTheme.headlineSmall),
+          Row(children: [
+            Expanded(child: Text('History', style: Theme.of(context).textTheme.headlineSmall)),
+            TextButton.icon(onPressed: () => Navigator.push(context, fadeRoute(const StatementScreen())), icon: const Icon(Icons.description_outlined), label: const Text('Statement')),
+          ]),
           const SizedBox(height: 12),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,

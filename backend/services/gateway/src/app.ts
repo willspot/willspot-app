@@ -13,6 +13,7 @@ export interface Upstreams {
   bills: string;
   risk: string;
   notifications: string;
+  support: string;
 }
 
 /**
@@ -30,6 +31,8 @@ export const ROUTES: { prefix: string; to: keyof Upstreams; strict?: boolean }[]
   { prefix: "/v1/admin/admins", to: "identity" },
   { prefix: "/v1/notifications", to: "notifications" },
   { prefix: "/v1/admin/notifications", to: "notifications" },
+  { prefix: "/v1/support", to: "support" },
+  { prefix: "/v1/admin/support", to: "support" },
   { prefix: "/v1/wallet", to: "wallet" },
   { prefix: "/v1/webhooks", to: "wallet" },
   { prefix: "/v1/sandbox", to: "wallet" },
@@ -104,6 +107,10 @@ export async function buildGateway(opts: GatewayOptions) {
       http2: false,
       config: r.strict ? { rateLimit: { max: limits.strict, timeWindow: "1 minute" } } : {},
       replyOptions: {
+        // A pooled keep-alive connection can hit a pod that just shut down. Retry on another
+        // connection, for idempotent methods only (reply-from: GET, HEAD, OPTIONS, TRACE), so a
+        // POST that moves money is never sent twice (gateway.test.ts covers both).
+        retriesCount: 2,
         rewriteRequestHeaders: (req, headers) => {
           const h: Record<string, unknown> = { ...headers, "x-request-id": req.id, "x-forwarded-for": req.ip };
           delete h.traceparent;

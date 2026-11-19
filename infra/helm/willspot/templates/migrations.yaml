@@ -40,7 +40,9 @@ spec:
             - secretRef: { name: {{ include "willspot.fullname" $ }}-{{ $name }} }
           env:
             {{- range $k, $v := $.Values.config }}
+            {{- if not (has $k (list "METRICS_PORT" "MIGRATE_ONLY" "MIGRATE_ON_START")) }}
             - { name: {{ $k }}, value: {{ $v | quote }} }
+            {{- end }}
             {{- end }}
             - { name: MIGRATE_ONLY, value: "1" }
             - { name: METRICS_PORT, value: "0" }

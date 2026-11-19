@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 — 2026-11-19 — Phase 5: statements, referrals, support; CI fixed; Kubernetes tested
+- **Statements** (ADR-029): `GET /v1/wallet/statements` (JSON/CSV, any asset, up to a year) built from ledger postings. App Statement screen; staff can export a customer's CSV from Users.
+- **Referral rewards** (ADR-028): referral codes, an optional code at sign-up, and an event-driven reward with per-referee idempotency, a monthly cap and a feature flag. App "Invite friends" screen.
+- **Support service** (ADR-030, port 4009): tickets, chat, internal notes, assignment, priority, stats. Customers get notifications. App Help & support; admin Support page; `support.manage` permission.
+- **CI** (ADR-031):
+  - the gitleaks CLI scans full history (the Action failed on the first push);
+  - Semgrep CE replaces CodeQL, which isn't licensed for private repos and is now behind `CODEQL_ENABLED`;
+  - actions moved to their Node 24 versions;
+  - deploy workflow inputs go through env vars.
+- **Security fixes found by Semgrep:** shell injection in `deploy.yml`; the AES-GCM tag length wasn't pinned (truncated tags were accepted).
+- **Kubernetes on kind:** the first real install found a duplicate env var in the migration Job and a `.dockerignore` that broke the admin image build. Load testing found requests dropped during rollouts, now fixed by sending `Connection: close` while draining and by retrying idempotent requests at the gateway.
+- `infra/kind/` holds the local cluster, the least-privilege Postgres roles and a per-service secrets script.
+- Tests: backend 144 → 155, Flutter 27 → 30, smoke 50 → 58.
+
 ## 0.4.0 — 2026-11-17 — Phase 4: production readiness + 2b leftovers
 - **Event bus** (ADR-021): transactional outbox (Postgres triggers) in identity, wallet, trade, gift cards and bills. The relay publishes to NATS JetStream; delivery is at-least-once with deduplication.
 - **Notifications service** (ADR-022, port 4008): in-app inbox, read state and preferences, device registration, and push through FCM HTTP v1. Admin push health appears on the Operations page.

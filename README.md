@@ -6,7 +6,7 @@ A Naira wallet for Nigeria: an account number for bank deposits, withdrawals to 
 
 ```
 brand/        brand.json + placeholder logo (seed for everything below)
-backend/      gateway · identity · wallet · trade · config · giftcards · bills · risk · notifications  (Fastify + TypeScript, Postgres per service, NATS events)
+backend/      gateway · identity · wallet · trade · config · giftcards · bills · risk · notifications · support  (Fastify + TypeScript, Postgres per service, NATS events)
 mobile/       Flutter app (Android + iOS)
 web/site      marketing website (Next.js static export, motion animations)
 web/admin     admin dashboard (Next.js, httpOnly-cookie BFF)
@@ -73,6 +73,20 @@ cd web && npm run typecheck && npm run build
 ```
 
 Production deployment, secrets, observability, backups and push setup: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## Verification (2026-11-19, phase 5)
+- **New features:** monthly statements from the ledger (app + CSV for staff), referral rewards (code at sign-up, ₦1,000 after a friend's verified first deposit of ₦5,000+), support tickets (app chat, staff queue with internal notes, notifications on reply).
+- **Backend: 155 tests pass** (was 144).
+- **Flutter: 30 tests pass** (was 27); analyze is clean.
+- **Smoke test: 58 checks** pass both on the local dev stack and on Kubernetes.
+- **Kubernetes (local kind, 1.37):** all 12 images build; `helm install` and two `helm upgrade`s succeed.
+  - The app database role is refused DDL and other services' databases.
+  - NetworkPolicies drop calls that aren't allowed.
+  - Redis holds the shared rate limit, and the backup CronJob works.
+  - Rollouts under load: 0 errors in 291,399 requests, after fixing 2 errors in 150,820 that the first run exposed.
+- **CI:** gitleaks history scan clean; Semgrep clean after fixing 2 real findings (shell injection in the deploy workflow, unpinned AES-GCM tag length); npm audit clean.
+- **On screen:** Android emulator against the live stack (statement, referrals, support chat with the internal note hidden); admin Support page in the browser.
+- **Not verified:** a cloud cluster, ingress/TLS, HPA, External Secrets, S3 backup upload, real push delivery.
 
 ## Verification (2026-11-17, phase 4)
 - **Backend:** typecheck clean; **144 tests pass** (was 114). New tests cover:
@@ -150,6 +164,8 @@ Provider choices and how to switch them on: [docs/PROVIDERS.md](docs/PROVIDERS.m
 **Not verified:** Docker image builds and compose stack (Docker daemon not running), GitHub Actions (no remote yet; YAML syntax checked only), iOS flows beyond the first screen, release-signed builds, any real provider.
 
 ## Screenshots
+Phase 5: [statement](docs/screenshots/mobile-statement.png) · [referrals](docs/screenshots/mobile-referrals.png) · [support chat](docs/screenshots/mobile-support-chat.png) · admin [support](docs/screenshots/admin-support.jpg)
+
 Phase 4: [inbox](docs/screenshots/mobile-inbox.png) · [home badge](docs/screenshots/mobile-home-badge.png) · [2FA QR](docs/screenshots/mobile-2fa-qr.png) · [recovery codes](docs/screenshots/mobile-2fa-recovery.png) · [security notice](docs/screenshots/mobile-inbox-security.png) · [2FA sign-in](docs/screenshots/mobile-login-2fa.png) · admin [staff & roles](docs/screenshots/admin-staff-roles.jpg) · [support role](docs/screenshots/admin-support-role.jpg) · [operations](docs/screenshots/admin-ops-phase4.jpg)
 
 Android emulator, live sandbox backend: [onboarding](docs/screenshots/android-onboarding.png) · [home](docs/screenshots/android-home.png) · [convert](docs/screenshots/android-convert.png) · [gift cards](docs/screenshots/android-giftcards.png) · [bills](docs/screenshots/android-bills.png) · [markets](docs/screenshots/android-markets.png) · iOS simulator: [onboarding](docs/screenshots/ios-onboarding.png)

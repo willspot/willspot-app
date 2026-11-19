@@ -100,6 +100,9 @@ export async function createApp(service: string, opts: AppOptions = {}): Promise
     reply.header("x-request-id", req.id);
     if (!reply.hasHeader("cache-control")) reply.header("cache-control", "no-store");
     reply.removeHeader("x-powered-by");
+    // While draining after SIGTERM, ask keep-alive clients (the gateway, other services) to
+    // reconnect, so their next request goes to a live pod instead of one about to close.
+    if (app.draining) reply.header("connection", "close");
     return payload;
   });
 

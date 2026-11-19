@@ -94,6 +94,7 @@ describe("metrics and readiness", () => {
     app.draining = true;
     expect((await app.inject({ method: "GET", url: "/readyz" })).json().status).toBe("draining");
     expect((await app.inject({ method: "GET", url: "/healthz" })).statusCode).toBe(200); // liveness unaffected
+    expect((await app.inject({ method: "GET", url: "/healthz" })).headers.connection).toBe("close"); // clients move off this pod
     await app.close();
   });
 });
@@ -238,4 +239,17 @@ describe.skipIf(!hasNats)("NATS JetStream bus", () => {
     await pub.close();
     await sub.close();
   }, 30_000);
+});
+
+describe("field encryption", () => {
+  it("rejects a truncated GCM tag (would otherwise make forgery much easier)", async () => {
+    const { FieldCipher } = await import("../src/index.js");
+    const { randomBytes } = await import("node:crypto");
+    const c = new FieldCipher(randomBytes(32).toString("base64"));
+    const blob = c.encrypt("GIFT-CODE-1234");
+    expect(c.decrypt(blob)).toBe("GIFT-CODE-1234");
+    const [v, iv, tag, ct] = blob.split(".");
+    const short = Buffer.from(tag!, "base64url").subarray(0, 4).toString("base64url");
+    expect(() => c.decrypt([v, iv, short, ct].join("."))).toThrow("bad ciphertext");
+  });
 });

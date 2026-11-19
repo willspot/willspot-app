@@ -35,6 +35,8 @@ import {
 } from "@willspot/common";
 import { balancesFor, ensureAccount, postJournal, postJournalTx, sysCode, userCode, type Leg } from "./ledger.js";
 import { registerOpsRoutes, trackWebhookFailures } from "./ops.js";
+import { registerStatementRoutes } from "./statements.js";
+import { DEFAULT_REFERRALS, referralHandler, registerReferralRoutes, type ReferralSettings } from "./referrals.js";
 import type { BankProvider } from "./providers.js";
 
 export interface UserInfo {
@@ -44,6 +46,7 @@ export interface UserInfo {
   email?: string;
   phone?: string;
   lastName: string;
+  referredBy?: string | null;
 }
 
 export interface WalletDeps {
@@ -54,6 +57,8 @@ export interface WalletDeps {
   flags: FlagsClient;
   /** AML/fraud screening. Absent in unit tests that don't exercise it. */
   risk?: RiskClient;
+  /** Referral reward rules (defaults: ₦1,000 for a first deposit of ₦5,000+, 50 a month). */
+  referrals?: ReferralSettings;
   /** NGN per USD used only to size USD deposits for risk screening. */
   riskUsdNgn?: number;
   webhookSecret: string;
@@ -501,6 +506,13 @@ export async function buildWallet(deps: WalletDeps) {
   });
 
   registerOpsRoutes(app, db, auth as never);
+  const referrals = deps.referrals ?? DEFAULT_REFERRALS;
+  registerReferralRoutes(app, db, auth, deps.flags, referrals);
+  app.decorate("onReferralEvent", referralHandler(db, deps.users, deps.flags, referrals, (m) => app.log.info(m)));
+  registerStatementRoutes(app, db, auth, async (id) => {
+    const u = await deps.users.get(id).catch(() => null);
+    return u ? `${u.firstName} ${u.lastName}` : id;
+  });
   app.decorate("walletJobs", { reverseWithdrawal });
   return app;
 }
@@ -547,5 +559,6 @@ async function history(db: Db, userId: string, limit: number, offset: number) {
 declare module "fastify" {
   interface FastifyInstance {
     walletJobs: { reverseWithdrawal(id: string, reason: string): Promise<void> };
+    onReferralEvent: (e: import("@willspot/common").DomainEvent) => Promise<string>;
   }
 }

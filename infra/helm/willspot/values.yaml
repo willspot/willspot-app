@@ -57,7 +57,7 @@ services:
     database: true
     resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 384Mi } }
     autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 }
-    allowFrom: [gateway, wallet, trade, giftcards, bills, risk]
+    allowFrom: [gateway, wallet, trade, giftcards, bills, risk, support]
   wallet:
     port: 4002
     replicas: 2
@@ -78,7 +78,7 @@ services:
     database: true
     resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
     autoscaling: { enabled: false }
-    allowFrom: [gateway, identity, wallet, trade, giftcards, bills]
+    allowFrom: [gateway, identity, wallet, trade, giftcards, bills, support]
   giftcards:
     port: 4005
     replicas: 2
@@ -106,6 +106,14 @@ services:
     database: true
     resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
     autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 6, cpu: 70 }
+    allowFrom: [gateway]
+
+  support:
+    port: 4009
+    replicas: 2
+    database: true
+    resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
+    autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 4, cpu: 70 }
     allowFrom: [gateway]
 
 # Admin dashboard (Next.js). Keep it off the public internet if you can (VPN / IP allowlist).

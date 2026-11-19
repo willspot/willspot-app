@@ -59,7 +59,7 @@ describe("staff accounts and roles", () => {
     expect((await post("/v1/auth/admin-setup", { token: setupToken, password: "Str0ngStaffPass" })).statusCode).toBe(200);
     expect((await post("/v1/auth/admin-setup", { token: setupToken, password: "An0therPassword" })).statusCode).toBe(401);
     const s = (await login("help@willspot.test", "Str0ngStaffPass")).json();
-    expect(s.user.permissions).toEqual(["users.read", "users.reset_2fa", "money.read"]);
+    expect(s.user.permissions).toEqual(["users.read", "users.reset_2fa", "money.read", "support.manage"]);
 
     // support can read users but not suspend them or manage admins
     expect((await get("/v1/admin/users", s.accessToken)).statusCode).toBe(200);

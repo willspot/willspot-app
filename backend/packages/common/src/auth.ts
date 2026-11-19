@@ -29,6 +29,7 @@ export const PERMISSIONS = [
   "ops.read",
   "config.manage",
   "audit.read",
+  "support.manage",
   "admins.manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
@@ -40,7 +41,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, readonly Permission[]> = {
   super_admin: PERMISSIONS,
   compliance: ["users.read", "users.suspend", "kyc.review", "risk.manage", "risk.reports", "giftcards.review", "money.read", "audit.read"],
   finance: ["users.read", "money.read", "money.manage", "giftcards.review", "ops.read"],
-  support: ["users.read", "users.reset_2fa", "money.read"],
+  support: ["users.read", "users.reset_2fa", "money.read", "support.manage"],
   operations: ["ops.read", "money.read", "config.manage"],
 };
 

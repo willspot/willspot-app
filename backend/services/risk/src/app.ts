@@ -17,6 +17,7 @@ import {
   tx,
   uuidSchema,
   type Db,
+  toCsv,
 } from "@willspot/common";
 import { evaluate, type Rule } from "./rules.js";
 
@@ -40,17 +41,8 @@ const DIRECTION: Record<string, "in" | "out" | "neutral"> = {
   convert: "neutral",
 };
 
-/** CSV with every field quoted and formula-leading characters neutralised (CSV injection). */
-export function toCsv(rows: Record<string, unknown>[]): string {
-  if (!rows.length) return "";
-  const cols = Object.keys(rows[0]!);
-  const cell = (v: unknown) => {
-    let s = v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
-    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-    return `"${s.replace(/"/g, '""')}"`;
-  };
-  return [cols.map(cell).join(","), ...rows.map((r) => cols.map((c) => cell(r[c])).join(","))].join("\n") + "\n";
-}
+/** Re-exported for existing importers; the helper lives in @willspot/common. */
+export { toCsv };
 
 export async function buildRisk(deps: RiskDeps) {
   const { db } = deps;

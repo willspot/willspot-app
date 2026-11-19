@@ -22,6 +22,7 @@ x-service: &service
     BILLS_INTERNAL_URL: http://bills:4006
     RISK_INTERNAL_URL: http://risk:4007
     NOTIFICATIONS_INTERNAL_URL: http://notifications:4008
+    SUPPORT_INTERNAL_URL: http://support:4009
     REDIS_URL: redis://redis:6379
     NATS_URL: nats://nats:4222
     # Traces go to the collector in the "observability" profile; harmless if it's not running.
@@ -34,6 +35,7 @@ x-service: &service
     BILLS_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_bills
     RISK_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_risk
     NOTIFICATIONS_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_notifications
+    SUPPORT_DATABASE_URL: postgres://willspot:willspot@postgres:5432/willspot_support
   depends_on:
     postgres:
       condition: service_healthy
@@ -114,11 +116,16 @@ services:
     build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: notifications } }
     environment: { <<: *common-env, PORT: "4008" }
 
+  support:
+    <<: *service
+    build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: support } }
+    environment: { <<: *common-env, PORT: "4009" }
+
   gateway:
     <<: *service
     build: { context: .., dockerfile: backend/Dockerfile, args: { SERVICE: gateway } }
     environment: { <<: *common-env, PORT: "8080" }
-    depends_on: [identity, wallet, trade, config, giftcards, bills, risk, notifications, redis]
+    depends_on: [identity, wallet, trade, config, giftcards, bills, risk, notifications, support, redis]
     ports: ["8080:8080"]
     networks: [internal, edge]
 

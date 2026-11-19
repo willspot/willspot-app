@@ -3,7 +3,7 @@ name: release
 # Tag a component to ship it on its own, e.g.  git tag wallet-v0.2.0 && git push --tags
 on:
   push:
-    tags: ["gateway-v*", "identity-v*", "wallet-v*", "trade-v*", "config-v*", "giftcards-v*", "bills-v*", "risk-v*", "notifications-v*", "admin-v*", "backup-v*"]
+    tags: ["gateway-v*", "identity-v*", "wallet-v*", "trade-v*", "config-v*", "giftcards-v*", "bills-v*", "risk-v*", "notifications-v*", "support-v*", "admin-v*", "backup-v*"]
 
 permissions:
   contents: read
@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production # add required reviewers on this environment in GitHub settings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Work out service and version from the tag
         id: meta
         run: |
