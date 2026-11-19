@@ -1,6 +1,6 @@
 import { FieldCipher, FlagsClient, createPool, loadIssuer, loadVerifier, busFromEnv, loadSecretFiles, migrateOnlyAndExit, serve, startOutboxRelay } from "@willspot/common";
 import { buildIdentity, seedAdmin, MIGRATIONS } from "./app.js";
-import { DojahKycProvider, SandboxKycProvider, SandboxOtpSender, TermiiOtpSender, type KycProvider, type OtpSender } from "./providers.js";
+import { DojahFaceVerifier, DojahKycProvider, SandboxFaceVerifier, SandboxKycProvider, SandboxOtpSender, TermiiOtpSender, type FaceVerifier, type KycProvider, type OtpSender } from "./providers.js";
 
 loadSecretFiles();
 const env = (k: string, d?: string) => {
@@ -24,6 +24,13 @@ const kyc: KycProvider =
   env("KYC_PROVIDER", "sandbox") === "dojah"
     ? new DojahKycProvider(env("DOJAH_APP_ID"), env("DOJAH_SECRET_KEY"), { baseUrl: process.env.DOJAH_BASE_URL || undefined })
     : new SandboxKycProvider();
+const face: FaceVerifier =
+  env("FACE_PROVIDER", "sandbox") === "dojah"
+    ? new DojahFaceVerifier(env("DOJAH_APP_ID"), env("DOJAH_SECRET_KEY"), { baseUrl: process.env.DOJAH_BASE_URL || undefined, threshold: Number(env("FACE_MATCH_THRESHOLD", "90")) })
+    : new SandboxFaceVerifier();
+if (production && face instanceof SandboxFaceVerifier && process.env.ALLOW_SANDBOX_IN_PRODUCTION !== "1") {
+  throw new Error("Refusing to start: sandbox selfie checks in production (set FACE_PROVIDER=dojah)");
+}
 if (production && (otp instanceof SandboxOtpSender || kyc instanceof SandboxKycProvider) && process.env.ALLOW_SANDBOX_IN_PRODUCTION !== "1") {
   throw new Error("Refusing to start: sandbox OTP or KYC provider in production");
 }
@@ -45,6 +52,7 @@ const app = await buildIdentity({
     risk: process.env.SERVICE_TOKEN_RISK,
     support: process.env.SERVICE_TOKEN_SUPPORT,
   },
+  face,
   cipher: process.env.IDENTITY_FIELD_KEY ? new FieldCipher(process.env.IDENTITY_FIELD_KEY) : undefined,
   flags: new FlagsClient(
     process.env.CONFIG_INTERNAL_URL && process.env.SERVICE_TOKEN_IDENTITY

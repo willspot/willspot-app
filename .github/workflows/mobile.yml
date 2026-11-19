@@ -22,8 +22,10 @@ jobs:
         working-directory: mobile
     steps:
       - uses: actions/checkout@v5
-      - name: Bundled brand matches brand/brand.json
-        run: diff ../brand/brand.json assets/brand.json
+      - name: Bundled brand and FAQ match brand/ (run web/scripts/sync-brand.mjs after editing)
+        run: |
+          diff ../brand/brand.json assets/brand.json
+          diff ../brand/faq.json assets/faq.json
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.47.7

@@ -59,6 +59,8 @@ export interface WalletDeps {
   risk?: RiskClient;
   /** Referral reward rules (defaults: ₦1,000 for a first deposit of ₦5,000+, 50 a month). */
   referrals?: ReferralSettings;
+  /** Shown on PDF statements (defaults to WillSpot). */
+  brandName?: string;
   /** NGN per USD used only to size USD deposits for risk screening. */
   riskUsdNgn?: number;
   webhookSecret: string;
@@ -512,7 +514,7 @@ export async function buildWallet(deps: WalletDeps) {
   registerStatementRoutes(app, db, auth, async (id) => {
     const u = await deps.users.get(id).catch(() => null);
     return u ? `${u.firstName} ${u.lastName}` : id;
-  });
+  }, deps.brandName);
   app.decorate("walletJobs", { reverseWithdrawal });
   return app;
 }

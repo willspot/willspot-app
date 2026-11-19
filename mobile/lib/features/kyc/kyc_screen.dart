@@ -5,8 +5,10 @@ import '../../core/api.dart';
 import '../../core/app_state.dart';
 import '../../ui/motion.dart';
 import '../../ui/widgets.dart';
+import 'selfie_screen.dart';
 
-/// Tier 1: BVN. Tier 2: government ID + selfie, reviewed by an admin.
+/// Tier 1: BVN. Tier 2: selfie (liveness + match to the BVN photo, checked on the server),
+/// then a government ID reviewed by an admin.
 class KycScreen extends StatefulWidget {
   const KycScreen({super.key});
   @override
@@ -64,8 +66,7 @@ class _KycScreenState extends State<KycScreen> {
 
   Future<void> _submitId() => _run(() async {
         if (_idNumber.text.trim().length < 6) return showInfo(context, 'Enter your ID number');
-        // Selfie capture (camera + liveness) needs a KYC vendor SDK; a placeholder reference is sent for now.
-        await AppScope.read(context).api.post('/v1/kyc/id', {'idType': _idType, 'idNumber': _idNumber.text.trim(), 'selfieRef': 'pending-capture'});
+        await AppScope.read(context).api.post('/v1/kyc/id', {'idType': _idType, 'idNumber': _idNumber.text.trim()});
         await _loadStatus();
         if (mounted) showInfo(context, 'Submitted. We review IDs within one working day.');
       });
@@ -76,6 +77,7 @@ class _KycScreenState extends State<KycScreen> {
     final tier = state.kycTier;
     final cs = Theme.of(context).colorScheme;
     final pending = ((_status?['submissions'] as List?) ?? const []).any((s) => s['level'] == 2 && s['status'] == 'pending');
+    final selfieOk = (_status?['selfie'] as Map?)?['status'] == 'passed';
     return Scaffold(
       appBar: AppBar(title: const Text('Verification')),
       body: ListView(padding: const EdgeInsets.all(20), children: [
@@ -112,6 +114,24 @@ class _KycScreenState extends State<KycScreen> {
                       Text(pending ? 'We will notify you when it is approved.' : 'Add a government ID to raise your daily limit to ₦5,000,000.', style: TextStyle(color: cs.onSurfaceVariant)),
                       if (!pending) ...[
                         const SizedBox(height: 16),
+                        Card(
+                          child: ListTile(
+                            leading: Icon(selfieOk ? Icons.check_circle : Icons.face_retouching_natural, color: selfieOk ? Colors.green : cs.primary),
+                            title: Text(selfieOk ? 'Selfie verified' : 'Step 1: take a selfie'),
+                            subtitle: Text(selfieOk ? 'Matched to your BVN photo' : 'Under a minute, with your front camera'),
+                            trailing: selfieOk ? null : const Icon(Icons.chevron_right),
+                            onTap: selfieOk
+                                ? null
+                                : () async {
+                                    await Navigator.push(context, fadeRoute(const SelfieScreen()));
+                                    if (mounted) _loadStatus();
+                                  },
+                          ),
+                        ),
+                        if (selfieOk) ...[
+                        const SizedBox(height: 12),
+                        Text('Step 2: your ID', style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 8),
                         DropdownButtonFormField<String>(
                           initialValue: _idType,
                           decoration: const InputDecoration(labelText: 'ID type'),
@@ -127,6 +147,7 @@ class _KycScreenState extends State<KycScreen> {
                         TextField(controller: _idNumber, decoration: const InputDecoration(labelText: 'ID number')),
                         const SizedBox(height: 20),
                         BusyButton(label: 'Submit for review', busy: _busy, onPressed: _submitId),
+                        ],
                       ],
                     ])
                   : const EmptyState(key: ValueKey('done'), icon: Icons.verified_rounded, title: "You're fully verified", message: 'Highest limits unlocked.'),

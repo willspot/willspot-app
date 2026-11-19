@@ -4,6 +4,7 @@ import '../../core/api.dart';
 import '../../core/app_state.dart';
 import '../../ui/motion.dart';
 import '../../ui/widgets.dart';
+import 'help_centre_screen.dart';
 import 'ticket_screen.dart';
 
 const supportCategories = {
@@ -73,6 +74,15 @@ class _SupportScreenState extends State<SupportScreen> {
               leading: Icon(Icons.shield_outlined, color: cs.primary),
               title: const Text('We will never ask for your PIN, password or codes'),
               subtitle: Text('Only talk to us here in the app or at ${state.brand.supportEmail}.'),
+            ),
+          ),
+          Card(
+            child: ListTile(
+              leading: Icon(Icons.menu_book_outlined, color: cs.primary),
+              title: const Text('Help centre'),
+              subtitle: const Text('Quick answers to common questions'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _open(const HelpCentreScreen()),
             ),
           ),
           const SizedBox(height: 8),

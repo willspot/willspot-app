@@ -20,6 +20,7 @@ const NAV: readonly (readonly [string, string, string | null])[] = [
   ["/trade", "Rates & convert", "money.read"],
   ["/branding", "Branding", "config.manage"],
   ["/flags", "Feature flags", "config.manage"],
+  ["/faq", "Help centre FAQ", "config.manage"],
   ["/risk", "Risk & AML", "risk.manage"],
   ["/ops", "Operations", "ops.read"],
   ["/audit", "Audit log", "audit.read"],

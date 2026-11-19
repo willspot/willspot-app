@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { createPool, createTestDatabase, type Db } from "@willspot/common";
+import { randomBytes } from "node:crypto";
+import { FieldCipher, createPool, createTestDatabase, type Db } from "@willspot/common";
 import { testKeys } from "../../../packages/common/test/helpers.js";
 import { buildIdentity, seedAdmin } from "../src/app.js";
 import { SandboxKycProvider, SandboxOtpSender } from "../src/providers.js";
@@ -15,7 +16,7 @@ beforeAll(async () => {
   drop = t.drop;
   db = createPool(t.url);
   const keys = await testKeys();
-  app = await buildIdentity({ db, ...keys, otp, kyc: new SandboxKycProvider(), serviceTokens: { wallet: "wallet-token-123456" }, logger: false });
+  app = await buildIdentity({ db, ...keys, otp, kyc: new SandboxKycProvider(), serviceTokens: { wallet: "wallet-token-123456" }, cipher: new FieldCipher(randomBytes(32).toString("base64")), logger: false });
   await seedAdmin(db, "admin@willspot.test", "AdminPassw0rd");
 });
 
@@ -98,10 +99,14 @@ describe("identity service", () => {
 
   it("runs tiered KYC: BVN (sandbox) then ID reviewed by an admin", async () => {
     const s = await signUp("kyc@example.com", "08030000005");
-    expect((await post("/v1/kyc/id", { idType: "nin", idNumber: "12345678901", selfieRef: "selfie/1" }, s.accessToken)).statusCode).toBe(400);
+    expect((await post("/v1/kyc/id", { idType: "nin", idNumber: "12345678901" }, s.accessToken)).statusCode).toBe(400);
     expect((await post("/v1/kyc/bvn", { bvn: "10000000000", dob: "1990-01-01" }, s.accessToken)).statusCode).toBe(400);
-    expect((await post("/v1/kyc/bvn", { bvn: "22200000000", dob: "1990-01-01" }, s.accessToken)).json()).toEqual({ tier: 1, status: "approved" });
-    const sub = await post("/v1/kyc/id", { idType: "nin", idNumber: "12345678901", selfieRef: "selfie/1" }, s.accessToken);
+    expect((await post("/v1/kyc/bvn", { bvn: "22200000001", dob: "1990-01-01" }, s.accessToken)).json()).toEqual({ tier: 1, status: "approved" });
+    // tier 2 needs a passed selfie check first
+    expect((await post("/v1/kyc/id", { idType: "nin", idNumber: "12345678901" }, s.accessToken)).json().error.code).toBe("selfie_required");
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), randomBytes(12_000)]).toString("base64");
+    expect((await post("/v1/kyc/selfie", { bvn: "22200000001", image: jpeg }, s.accessToken)).json().status).toBe("passed");
+    const sub = await post("/v1/kyc/id", { idType: "nin", idNumber: "12345678901" }, s.accessToken);
     expect(sub.statusCode).toBe(202);
 
     const adminLogin = (await post("/v1/auth/login", { email: "admin@willspot.test", password: "AdminPassw0rd" })).json();

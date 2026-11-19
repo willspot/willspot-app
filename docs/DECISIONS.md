@@ -105,3 +105,18 @@ Tickets and messages live in a separate `support` service and database (port 400
 
 ## ADR-031 — CI security scanning on a private repository (2026-11-19)
 CodeQL's licence allows free use only on open-source code, so it is off by default (repository variable `CODEQL_ENABLED`) until the repo is public or GitHub Advanced Security is bought. Semgrep CE with registry rules, which are licensed for internal use, is the default static analysis and fails on ERROR findings. Secret scanning runs the gitleaks CLI over full history. The gitleaks GitHub Action failed on the first push, because it asked git for the parent of the root commit. Workflow inputs reach shell scripts only through env vars.
+
+## ADR-032 — Selfie liveness and face match on the server, through the KYC vendor (2026-11-19)
+Tier 2 now needs a selfie that passes liveness and matches the photo held for the user's BVN, before the ID goes to a person for review. The checks run on the server through Dojah: `POST /api/v1/ml/liveness`, then `POST /api/v1/kyc/bvn/verify` with `selfie_image` and a threshold (default 90; read from docs.dojah.io on 2026-11-19). A sandbox stand-in is used until keys exist. Nothing on the phone decides the result. On-device ML Kit was not used: its SDK is proprietary (Google terms), it needs CocoaPods on iOS, and on-device checks can be spoofed.
+- The app captures the photo with the front camera only: a live preview with an oval guide, or the system camera as a fallback. Gallery photos are never accepted.
+- The BVN is stored only as a hash, so the user re-enters it. The server checks it against the verified BVN's hash.
+- The photo is AES-GCM encrypted at rest and readable only by reviewers. Every view is audited.
+- 5 attempts per day. The same photo can't be used by another account.
+- The paid face match is skipped when liveness fails.
+- A clear reason is shown on failure.
+
+## ADR-033 — Help centre FAQ as admin-editable config (2026-11-19)
+The FAQ is a third config document next to brand and flags, seeded from `brand/faq.json`. It is validated (ids, lengths), versioned with history, and editable in the dashboard by `config.manage`. The website's `/help` page and the app's Help centre bundle a copy, so they render instantly, work offline and can be indexed by search engines, then refresh from `GET /v1/config/faq`. The text is plain and rendered as text, never as HTML. `{{brand}}` is replaced with the brand name, so a rebrand needs no FAQ edits.
+
+## ADR-034 — PDF statements generated on the server (2026-11-19)
+`format=pdf` on the statements endpoint builds an A4 PDF with pdf-lib (MIT): summary box, running balance, paging, and a footer carrying a reference (SHA-256 of the statement content) that support can recompute. The built-in Helvetica covers only Latin-1, so ₦ prints as "NGN", accents are dropped and other characters become "?". The PDF never fails on unusual names. Embedding a font with full Unicode coverage is a possible later improvement. The app saves the PDF to its temporary folder, opens the system share sheet (share_plus), and deletes the file when the screen closes.

@@ -7,7 +7,8 @@
 | **2b — Leftovers** (done in phase 4) | Push notifications (FCM/APNs); per-admin roles; event bus (NATS) between services; user-facing 2FA | **Built, tested locally** (push delivery to a real device not verified) |
 | **3 — Real providers + compliance tooling** (approved 2026-11-17) | Provider research; Paystack, Dojah, Termii, VTpass adapters (off until keys); risk/AML service with holds, cases, STR/CTR drafts; ops reconciliation and alerts; certificate pinning; device signals | **Built, tested locally with fake provider servers.** Going live is blocked on **counsel + contracts + sandbox keys** |
 | **5 — Customer features + CI fixes** (2026-11-19) | Statements, referral rewards, support tickets (new service); security CI fixed (gitleaks history scan, Semgrep instead of licence-restricted CodeQL); chart installed and tested on a local kind cluster | **Built, tested locally (incl. Kubernetes)** |
-| 3b — Remaining providers | Reloadly (gift-card supply), Quidax (crypto liquidity), Fincra (USD accounts), KYC liveness/selfie SDK, Play Integrity / App Attest | Needs official API docs/access |
+| **6 — KYC selfie, help centre, PDF statements** (2026-11-19) | Server-side liveness + face match (Dojah adapter + sandbox), guided selfie capture; admin-editable FAQ on site/app; PDF statements shared from the app | **Built, tested locally** (real Dojah needs keys) |
+| 3b — Remaining providers | Reloadly (gift-card supply), Quidax (crypto liquidity), Fincra (USD accounts), Play Integrity / App Attest (selfie liveness done in phase 6 via Dojah) | Needs official API docs/access |
 | **4 — Production** (approved 2026-11-17) | Provider-neutral Helm chart (migrations Job, per-service secrets, NetworkPolicies, HPAs/PDBs, zero-downtime rollouts, graceful shutdown); gated deploy workflow; OpenTelemetry traces, Prometheus metrics, alert rules, Grafana dashboard; encrypted backups + restore drills; plus all of 2b | **Built; chart validated but not installed on a cluster.** Still to do: choose the Nigerian host, pen test, store submissions (owner steps in DEPLOYMENT.md) |
 
 ## Open decisions for the owner
@@ -33,7 +34,7 @@
 - USD account, gift-card buying and bills use sandbox providers only; each needs a licensed partner (BENNYBIT_ANALYSIS §6).
 - No automated alert when a trade sits in `pending_settlement`; ops must watch the admin conversions list.
 - ~~Quote → order not retried on transport failure~~ — fixed in phase 2 (settlement retrier, ADR-016).
-- Selfie capture is a placeholder reference; real capture needs a KYC SDK.
+- Selfie liveness/face match uses Dojah's server API (sandbox until keys); real accuracy depends on Dojah and was not measured.
 - Fonts in the Flutter app fall back to the platform font until font files are bundled.
 - Rate limiting is per gateway replica unless `REDIS_URL` is set. The Redis path is wired but **not run locally** (no Redis on this machine; it runs in docker-compose and CI).
 - All 12 Docker images build (2026-11-19). The compose stack itself was not run (kind was used instead).

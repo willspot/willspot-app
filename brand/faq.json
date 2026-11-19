@@ -1,0 +1,59 @@
+{
+  "categories": [
+    {
+      "id": "getting-started",
+      "title": "Getting started",
+      "items": [
+        { "id": "what-is", "q": "What is {{brand}}?", "a": "{{brand}} is a Naira wallet. You get your own account number for bank transfers, and you can withdraw to any Nigerian bank, buy and sell crypto, convert between currencies, sell gift cards and pay bills, all in one app." },
+        { "id": "who-can-join", "q": "Who can open an account?", "a": "Anyone aged 18 or over with a Nigerian phone number. You sign up with your email and phone, confirm the code we text you, and set a transaction PIN." },
+        { "id": "verification-levels", "q": "Why do I need to verify my identity?", "a": "Verification keeps your money safe and is required by law. Verifying your BVN unlocks deposits, withdrawals (up to ₦200,000 a day) and trading. Adding a selfie and a government ID raises your daily withdrawal limit to ₦5,000,000." }
+      ]
+    },
+    {
+      "id": "money",
+      "title": "Adding and withdrawing money",
+      "items": [
+        { "id": "add-money", "q": "How do I add money?", "a": "Open Add money to see your personal account number. Send a bank transfer to it from any Nigerian bank and the money appears in your wallet, usually within minutes." },
+        { "id": "deposit-missing", "q": "I sent money but it hasn't arrived. What should I do?", "a": "Most transfers arrive within minutes, but banks sometimes delay them. If it has been more than an hour, open Help & support, start a request under Adding money and include the amount, time and sending bank." },
+        { "id": "withdraw-fee", "q": "How much does a withdrawal cost?", "a": "Each withdrawal to a bank account costs ₦50. You see the fee and the total before you confirm with your PIN." },
+        { "id": "withdraw-failed", "q": "My withdrawal failed. Where is my money?", "a": "If the bank rejects a withdrawal, the full amount, including the fee, goes back to your wallet automatically and we send you a notification." },
+        { "id": "statements", "q": "Can I get an account statement?", "a": "Yes. Open History, then Statement, pick a month and tap Share PDF to send it by email, WhatsApp or save it to your phone." }
+      ]
+    },
+    {
+      "id": "crypto",
+      "title": "Crypto and converting",
+      "items": [
+        { "id": "rates", "q": "How are crypto prices set?", "a": "Every quote shows the exact amount you pay and receive. The price is locked for a short time so it can't change while you confirm." },
+        { "id": "convert", "q": "Can I convert between currencies?", "a": "Yes. Use Convert to move between Naira, dollars and the supported crypto assets. Naira is selected by default." },
+        { "id": "crypto-risk", "q": "Is crypto risky?", "a": "Crypto prices can rise or fall quickly and you can lose money. Only buy what you can afford to lose. {{brand}} does not give investment advice." }
+      ]
+    },
+    {
+      "id": "giftcards-bills",
+      "title": "Gift cards and bills",
+      "items": [
+        { "id": "sell-giftcard", "q": "How long does it take to sell a gift card?", "a": "Our team checks every card before paying. Once it is approved, the Naira lands in your wallet straight away and we notify you." },
+        { "id": "giftcard-declined", "q": "Why was my gift card declined?", "a": "Usually because the card was already used, the code was unreadable or the value didn't match. The reason is shown on the trade and in your notification." },
+        { "id": "bill-failed", "q": "My airtime or bill payment failed. Do I get a refund?", "a": "Yes. If a payment can't be completed, the money is returned to your wallet automatically." }
+      ]
+    },
+    {
+      "id": "security",
+      "title": "Security",
+      "items": [
+        { "id": "never-share", "q": "Will {{brand}} ever ask for my PIN or password?", "a": "Never. Our team will never ask for your password, transaction PIN, one-time codes or recovery codes, by phone, email or chat. If someone does, they are not us." },
+        { "id": "two-factor", "q": "How do I protect my account further?", "a": "Turn on two-factor sign-in in Profile. You'll then need a code from an authenticator app to sign in, and you get recovery codes in case you lose your phone." },
+        { "id": "new-device", "q": "I got a 'new sign-in' alert that wasn't me.", "a": "Change your password straight away, turn on two-factor sign-in, and contact us through Help & support." },
+        { "id": "lost-phone", "q": "I lost my phone. What do I do?", "a": "Sign in on a new phone and use a recovery code if two-factor sign-in is on. If you can't sign in, contact support. We'll verify your identity before making any change." }
+      ]
+    },
+    {
+      "id": "rewards",
+      "title": "Invite friends",
+      "items": [
+        { "id": "referrals", "q": "How do referral rewards work?", "a": "Share your code from Profile, then Invite friends. When a friend signs up with it, verifies their BVN and makes their first qualifying deposit, you get a reward in your wallet. The current amount and rules are shown on that screen." }
+      ]
+    }
+  ]
+}

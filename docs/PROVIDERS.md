@@ -6,6 +6,7 @@ Researched 2026-11-17. Each adapter is written only against what the **vendor's 
 |---|---|---|---|
 | Naira virtual accounts, bank list, name enquiry, payouts | **Paystack** | Adapter built (`BANK_PROVIDER=paystack`) | Paystack OpenAPI spec, `PaystackOSS/openapi` `dist/paystack.yaml` (sha256 prefix 4427de6c07533f3d) |
 | BVN verification | **Dojah** | Adapter built (`KYC_PROVIDER=dojah`) | docs.dojah.io — Lookup BVN |
+| Selfie liveness + face match to BVN photo | **Dojah** | Adapter built (`FACE_PROVIDER=dojah`) | docs.dojah.io/api-reference — Liveness Check (`/api/v1/ml/liveness`), BVN/NIN with Selfie (`/api/v1/kyc/bvn/verify`); read 2026-11-19 |
 | SMS OTP | **Termii** | Adapter built (`OTP_MODE=termii`) | developers.termii.com — Messaging API |
 | Airtime, data, electricity, TV | **VTpass** | Adapter built (`BILL_PROVIDER=vtpass`) | vtpass.com/documentation (buying services, authentication, response codes, requery, variation codes, DSTV, MTN, 9mobile) |
 | Gift-card supply (buying cards) | Reloadly (recommended) | **Not built** — order schema only seen in a community mirror | docs.reloadly.com/gift-cards (auth + audience confirmed); orders body UNVERIFIED |

@@ -60,3 +60,31 @@ describe("config service", () => {
     expect(i.json().flags.withdrawals).toBe(false);
   });
 });
+
+describe("help centre FAQ", () => {
+  it("serves the seeded FAQ publicly with an ETag", async () => {
+    const r = await app.inject({ method: "GET", url: "/v1/config/faq" });
+    expect(r.statusCode).toBe(200);
+    const f = r.json();
+    expect(f.categories.length).toBeGreaterThan(3);
+    expect(f.categories[0].items[0].q).toContain("{{brand}}"); // clients substitute the brand name
+    expect((await app.inject({ method: "GET", url: "/v1/config/faq", headers: { "if-none-match": String(r.headers.etag) } })).statusCode).toBe(304);
+  });
+
+  it("lets config managers edit it, keeps history, and rejects bad content", async () => {
+    const ops = await issuer.signAccess({ id: randomUUID(), role: "admin", roles: ["operations"], tier: 2, sid: "s" });
+    const support = await issuer.signAccess({ id: randomUUID(), role: "admin", roles: ["support"], tier: 2, sid: "s" });
+    const faq = { categories: [{ id: "fees", title: "Fees", items: [{ id: "withdraw", q: "What does a withdrawal cost?", a: "₦50 per withdrawal." }] }] };
+    const h = (t: string) => ({ authorization: `Bearer ${t}` });
+    expect((await app.inject({ method: "POST", url: "/v1/admin/config/faq", headers: h(support), payload: { faq } })).statusCode).toBe(403);
+    const saved = await app.inject({ method: "POST", url: "/v1/admin/config/faq", headers: h(ops), payload: { faq } });
+    expect(saved.statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/v1/config/faq" })).json()).toMatchObject({ ...faq, version: saved.json().version });
+    const hist = (await app.inject({ method: "GET", url: "/v1/admin/config/history?key=faq", headers: h(ops) })).json();
+    expect(hist.items.length).toBeGreaterThanOrEqual(1);
+    const dup = { categories: [{ id: "fees", title: "Fees", items: [{ id: "a1", q: "Q", a: "A" }, { id: "a1", q: "Q2", a: "A2" }] }] };
+    expect((await app.inject({ method: "POST", url: "/v1/admin/config/faq", headers: h(ops), payload: { faq: dup } })).json().error.code).toBe("duplicate_id");
+    const html = { categories: [{ id: "Bad Id!", title: "x", items: [{ id: "a", q: "q", a: "a" }] }] };
+    expect((await app.inject({ method: "POST", url: "/v1/admin/config/faq", headers: h(ops), payload: { faq: html } })).statusCode).toBe(400);
+  });
+});

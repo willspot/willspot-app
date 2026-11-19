@@ -14,7 +14,8 @@ Admin dashboard → **Feature flags**: switch sign-ups, deposits, withdrawals, c
 |---|---|
 | `brand/brand.json` | Default brand + flags. Seeds the config service on first start. |
 | `brand/logo.svg`, `brand/logo-mark.svg` | Placeholder WillSpot logo. Replace with yours (same file names). |
-| `mobile/assets/brand.json` | Copy used by the app offline. CI fails if it differs from `brand/brand.json`: copy it after editing. |
+| `mobile/assets/brand.json` | Copy used by the app offline. CI fails if it differs from `brand/brand.json`: run `node web/scripts/sync-brand.mjs` after editing. |
+| `brand/faq.json` | Default help centre FAQ (seeds the config service on first start; then edit it in the dashboard → Help centre FAQ). Write `{{brand}}` for the brand name. `sync-brand.mjs` copies it into the website and app. |
 | `mobile/lib/ui/logo.dart` | The painted fallback mark in the app (used when no PNG logo URL is set). |
 | `mobile/android/app/src/main/AndroidManifest.xml` (`android:label`), `mobile/ios/Runner/Info.plist` (`CFBundleDisplayName`) | App name under the icon. |
 | App icons | Replace `mobile/android/app/src/main/res/mipmap-*` and `mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset`. |

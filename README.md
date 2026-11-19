@@ -74,6 +74,29 @@ cd web && npm run typecheck && npm run build
 
 Production deployment, secrets, observability, backups and push setup: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
+## Verification (2026-11-19, phase 6)
+- **KYC selfie:**
+  - guided front-camera capture with an animated oval;
+  - server-side liveness, then face match against the BVN photo (Dojah adapter checked against its docs, sandbox until keys);
+  - encrypted photo, audited reviewer view, attempt limits, reused photos refused;
+  - tier 2 now requires a passed selfie.
+- **Help centre:** `/help` on the website and a help centre in the app (searchable, works offline), edited in the dashboard (Help centre FAQ) with version history.
+- **PDF statements:** an A4 PDF with summary, running balance, paging and a reference; shared from the app via the system share sheet; staff can download PDF or CSV.
+- **Backend: 165 tests pass** (was 155), including a fake Dojah built from its docs and PDF content checks.
+- **Flutter: 33 tests pass**; Android and iOS builds pass.
+- **Smoke test: 63 checks pass.**
+- **CI fully green** on GitHub, including the 10 image builds and Trivy scans.
+- **Emulator against the live stack:**
+  - selfie flow end to end: the camera's test image correctly failed the sandbox face check, with its reason shown;
+  - help centre search;
+  - "Share PDF" opened the share sheet, and the PDF pulled from the phone renders correctly (docs/screenshots/statement-pdf-page1.png).
+- **Browser:** website `/help` search; dashboard FAQ edit served by the API as version 2; the KYC page passes the selfie JPEG through byte for byte, with score chips.
+- **Fixes found while testing:**
+  - the dashboard proxy turned binary responses into text;
+  - running the brand sync twice at once failed (`EEXIST`);
+  - no way to retry the camera after a refused permission.
+- **Not verified:** real Dojah liveness and match accuracy (needs keys); a real face on a real phone.
+
 ## Verification (2026-11-19, phase 5)
 - **New features:** monthly statements from the ledger (app + CSV for staff), referral rewards (code at sign-up, ₦1,000 after a friend's verified first deposit of ₦5,000+), support tickets (app chat, staff queue with internal notes, notifications on reply).
 - **Backend: 155 tests pass** (was 144).
@@ -164,6 +187,8 @@ Provider choices and how to switch them on: [docs/PROVIDERS.md](docs/PROVIDERS.m
 **Not verified:** Docker image builds and compose stack (Docker daemon not running), GitHub Actions (no remote yet; YAML syntax checked only), iOS flows beyond the first screen, release-signed builds, any real provider.
 
 ## Screenshots
+Phase 6: selfie [tips](docs/screenshots/mobile-selfie-tips.png) · [camera](docs/screenshots/mobile-selfie-camera.png) · [result](docs/screenshots/mobile-selfie-result.png) · [help centre](docs/screenshots/mobile-help-centre.png) · [share PDF](docs/screenshots/mobile-statement-share.png) · [PDF page](docs/screenshots/statement-pdf-page1.png) · site [/help](docs/screenshots/site-help-centre.jpg) · admin [FAQ editor](docs/screenshots/admin-faq-editor.jpg) · [KYC selfie](docs/screenshots/admin-kyc-selfie.jpg)
+
 Phase 5: [statement](docs/screenshots/mobile-statement.png) · [referrals](docs/screenshots/mobile-referrals.png) · [support chat](docs/screenshots/mobile-support-chat.png) · admin [support](docs/screenshots/admin-support.jpg)
 
 Phase 4: [inbox](docs/screenshots/mobile-inbox.png) · [home badge](docs/screenshots/mobile-home-badge.png) · [2FA QR](docs/screenshots/mobile-2fa-qr.png) · [recovery codes](docs/screenshots/mobile-2fa-recovery.png) · [security notice](docs/screenshots/mobile-inbox-security.png) · [2FA sign-in](docs/screenshots/mobile-login-2fa.png) · admin [staff & roles](docs/screenshots/admin-staff-roles.jpg) · [support role](docs/screenshots/admin-support-role.jpg) · [operations](docs/screenshots/admin-ops-phase4.jpg)

@@ -38,3 +38,22 @@ const LATER_FLAGS = new Set<string>(["referrals", "support"]);
 export const flagsSchema = z.object(
   Object.fromEntries(FLAG_NAMES.map((f) => [f, LATER_FLAGS.has(f) ? z.boolean().default(true) : z.boolean()])) as Record<(typeof FLAG_NAMES)[number], z.ZodBoolean>,
 );
+
+/**
+ * Help centre FAQ (admin-editable). "{{brand}}" in text is replaced with the brand name
+ * by the apps and website. Plain text only: clients render it as text, never as HTML.
+ */
+const slug = z.string().regex(/^[a-z0-9-]{2,40}$/);
+const text = (max: number) => z.string().trim().min(1).max(max);
+export const faqSchema = z.object({
+  categories: z
+    .array(
+      z.object({
+        id: slug,
+        title: text(60),
+        items: z.array(z.object({ id: slug, q: text(200), a: text(2000) })).min(1).max(40),
+      }),
+    )
+    .max(20),
+});
+export type Faq = z.infer<typeof faqSchema>;

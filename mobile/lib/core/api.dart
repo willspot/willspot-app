@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -54,6 +55,35 @@ class ApiClient {
   Future<bool>? _refreshing;
 
   Future<Map<String, dynamic>> get(String path) => _send('GET', path);
+
+  /// Downloads a binary response (e.g. a PDF statement) with the same session handling.
+  Future<Uint8List> getBytes(String path, {bool retried = false}) async {
+    final req = http.Request('GET', Uri.parse('$baseUrl$path'))
+      ..headers.addAll({
+        if (accessToken != null) 'authorization': 'Bearer $accessToken',
+        ...?(headerProvider == null ? null : await headerProvider!()),
+      });
+    late http.Response res;
+    try {
+      res = await http.Response.fromStream(await _http.send(req).timeout(const Duration(seconds: 60)));
+    } on TimeoutException {
+      throw ApiException(0, 'timeout', 'The server took too long to respond. Check your connection.');
+    } catch (_) {
+      throw ApiException(0, 'offline', "Can't reach WillSpot. Check your connection.");
+    }
+    if (res.statusCode == 401 && !retried && accessToken != null) {
+      if (await refresh()) return getBytes(path, retried: true);
+      onSessionExpired?.call();
+    }
+    if (res.statusCode >= 400) {
+      Map<String, dynamic> e = const {};
+      try {
+        e = ((jsonDecode(res.body) as Map)['error'] as Map).cast<String, dynamic>();
+      } catch (_) {}
+      throw ApiException(res.statusCode, e['code'] as String? ?? 'error', e['message'] as String? ?? 'Something went wrong');
+    }
+    return res.bodyBytes;
+  }
   Future<Map<String, dynamic>> post(String path, [Object? body, Map<String, String>? headers]) => _send('POST', path, body, headers);
 
   Future<Map<String, dynamic>> _send(String method, String path, [Object? body, Map<String, String>? headers, bool retried = false]) async {

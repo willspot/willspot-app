@@ -214,6 +214,23 @@ if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
   }
   const t2 = new Set((inbox2.items ?? []).map((n: { type: string }) => n.type));
   check("notifications: referral reward and support reply reached the inbox", t2.has("support.staff_replied") && t2.has("wallet.referral_reward"), [...t2]);
+
+  // ---------- Help centre, selfie KYC, PDF statements ----------
+  const faq = await call("GET", "/v1/config/faq");
+  check("help centre: FAQ served", faq.status === 200 && faq.json.categories?.length > 0, faq.json);
+  const { randomBytes } = await import("node:crypto");
+  const selfie = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), randomBytes(12_000)]).toString("base64");
+  const sf = await call("POST", "/v1/kyc/selfie", { bvn: "22233344455", image: selfie }, token);
+  check("kyc: selfie passes liveness and face match (sandbox)", sf.json.status === "passed", sf.json);
+  const idSub = await call("POST", "/v1/kyc/id", { idType: "nin", idNumber: `${randomInt(10_000_000_000, 99_999_999_999)}` }, token);
+  check("kyc: ID submitted after the selfie", idSub.status === 202, idSub.json);
+  const kq = (await call("GET", "/v1/admin/kyc", undefined, at)).json.items?.find((i: { id: string }) => i.id === idSub.json.submissionId);
+  check("kyc: reviewer sees the face-match score", Number(kq?.match_confidence) >= 90, kq);
+  const img = await fetch(`${API}/v1/admin/kyc/selfies/${kq?.selfie_ref}`, { headers: { authorization: `Bearer ${at}` } });
+  check("kyc: reviewer can open the selfie (JPEG)", img.status === 200 && img.headers.get("content-type") === "image/jpeg");
+  const pdf = await fetch(`${API}/v1/wallet/statements?from=${today}&to=${today}&format=pdf`, { headers: { authorization: `Bearer ${token}` } });
+  const pdfBytes = Buffer.from(await pdf.arrayBuffer());
+  check("statement: PDF download", pdf.status === 200 && pdf.headers.get("content-type") === "application/pdf" && pdfBytes.subarray(0, 5).toString() === "%PDF-", pdf.status);
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll smoke checks passed");

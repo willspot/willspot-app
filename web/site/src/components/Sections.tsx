@@ -138,6 +138,9 @@ export function Faq() {
           <span className="eyebrow">FAQ</span>
           <h2>Questions, answered.</h2>
         </Reveal>
+        <p className="muted" style={{ marginTop: 8 }}>
+          More answers in the <a href="/help">help centre</a>.
+        </p>
         <div style={{ marginTop: 24 }}>
           {FAQS.map(([q, a], i) => (
             <div key={q} className="faq-item">
@@ -198,7 +201,7 @@ export function Footer() {
           <strong>Product</strong>
           <a href="/#features">Features</a>
           <a href="/#rates">Rates</a>
-          <a href="/#faq">FAQ</a>
+          <a href="/help">Help centre</a>
         </div>
         <div>
           <strong>Legal</strong>

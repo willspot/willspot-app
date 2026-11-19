@@ -4,7 +4,7 @@ import { GATEWAY, csrfOk, refresh, tokens } from "@/lib/server";
  * Forwards dashboard calls to the gateway with the admin's bearer token.
  * Only /v1/admin/* and the public config/markets reads are allowed through.
  */
-const ALLOWED = [/^v1\/admin\//, /^v1\/config\/public$/, /^v1\/trade\/markets$/, /^v1\/me$/, /^v1\/me\/totp\/(setup|enable|disable)$/];
+const ALLOWED = [/^v1\/admin\//, /^v1\/config\/(public|faq)$/, /^v1\/trade\/markets$/, /^v1\/me$/, /^v1\/me\/totp\/(setup|enable|disable)$/];
 
 async function forward(req: Request, ctx: { params: Promise<{ path: string[] }> }) {
   const path = (await ctx.params).path.join("/");
@@ -28,9 +28,22 @@ async function forward(req: Request, ctx: { params: Promise<{ path: string[] }> 
     if (!fresh) return Response.json({ error: { code: "unauthorized", message: "Please sign in" } }, { status: 401 });
     r = await send(fresh);
   }
-  const type = r.headers.get("content-type")?.startsWith("text/csv") ? "text/csv; charset=utf-8" : "application/json";
-  const disposition = type.startsWith("text/csv") ? r.headers.get("content-disposition") : null;
-  return new Response(await r.text(), { status: r.status, headers: { "content-type": type, "cache-control": "no-store", ...(disposition ? { "content-disposition": disposition } : {}) } });
+  // Only known types pass through; anything else is treated as JSON. Binary bodies
+  // (KYC selfies, PDF statements) are forwarded as bytes, never decoded as text.
+  const upstream = r.headers.get("content-type") ?? "";
+  const type = upstream.startsWith("text/csv")
+    ? "text/csv; charset=utf-8"
+    : upstream.startsWith("image/jpeg")
+      ? "image/jpeg"
+      : upstream.startsWith("application/pdf")
+        ? "application/pdf"
+        : "application/json";
+  const binary = type === "image/jpeg" || type === "application/pdf";
+  const disposition = type === "application/json" ? null : r.headers.get("content-disposition");
+  return new Response(binary ? await r.arrayBuffer() : await r.text(), {
+    status: r.status,
+    headers: { "content-type": type, "cache-control": "no-store, private", ...(disposition ? { "content-disposition": disposition } : {}) },
+  });
 }
 
 export const GET = forward;

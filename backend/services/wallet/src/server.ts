@@ -36,6 +36,7 @@ const app = await buildWallet({
   riskUsdNgn: Number(process.env.RISK_USD_NGN ?? 1500),
   webhookSecret: env("DEPOSIT_WEBHOOK_SECRET"),
   sandbox,
+  brandName: process.env.BRAND_NAME || undefined,
   referrals: {
     rewardMinor: toMinor(env("REFERRAL_REWARD_NGN", "1000"), "NGN"),
     minDepositMinor: toMinor(env("REFERRAL_MIN_DEPOSIT_NGN", "5000"), "NGN"),

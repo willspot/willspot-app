@@ -43,7 +43,7 @@ import {
   type Db,
   type StepUpScope,
 } from "@willspot/common";
-import type { KycProvider, OtpSender } from "./providers.js";
+import { SandboxFaceVerifier, type FaceVerifier, type KycProvider, type OtpSender } from "./providers.js";
 
 export interface IdentityDeps {
   db: Db;
@@ -57,8 +57,13 @@ export interface IdentityDeps {
   flags?: FlagsClient;
   /** Encrypts TOTP secrets at rest. Required for TOTP endpoints. */
   cipher?: FieldCipher;
+  /** Selfie liveness + face match for KYC tier 2 (defaults to the sandbox). */
+  face?: FaceVerifier;
   logger?: boolean;
 }
+
+const SELFIE_MAX_BYTES = 1_500_000;
+const SELFIE_ATTEMPTS_PER_DAY = 5;
 
 export const MIGRATIONS = fileURLToPath(new URL("../migrations", import.meta.url));
 
@@ -127,7 +132,9 @@ const nameSchema = z.string().trim().min(1).max(60).regex(/^[\p{L}' -]+$/u, "Let
 export async function buildIdentity(deps: IdentityDeps) {
   const { db, issuer, verifier } = deps;
   await migrateOnStart(db, MIGRATIONS);
-  const app = await createApp("identity", { logger: deps.logger, ready: () => db.query("SELECT 1") });
+  // 2.2 MB: room for a base64 selfie (≤ 1.5 MB JPEG); everything else stays small.
+  const app = await createApp("identity", { logger: deps.logger, bodyLimit: 2_200_000, ready: () => db.query("SELECT 1") });
+  const face = deps.face ?? new SandboxFaceVerifier();
   const auth = authenticate(verifier);
 
   const totpSecret = (u: UserRow) => {
@@ -508,23 +515,70 @@ export async function buildIdentity(deps: IdentityDeps) {
     return { tier: 1, status: "approved" };
   });
 
+  /**
+   * Selfie check for tier 2: liveness, then a match against the BVN photo. The BVN is
+   * re-entered (we only keep its hash) and must be the one already verified.
+   */
+  app.post("/v1/kyc/selfie", { preHandler: auth }, async (req) => {
+    if (!deps.cipher) throw new AppError(503, "selfie_unavailable", "Selfie checks are not configured");
+    const body = parse(z.object({ bvn: bvnSchema, image: z.string().min(100).max(2_100_000) }), req.body);
+    const u = await getUser(currentUser(req).id);
+    if (!u) throw notFound();
+    if (u.kyc_tier < 1) throw badRequest("tier1_required", "Verify your BVN first");
+    const passed = await db.query("SELECT 1 FROM selfie_checks WHERE user_id=$1 AND status='passed'", [u.id]);
+    if (passed.rowCount) return { status: "passed", message: "Your selfie is already verified" };
+    const bvnOk = await db.query("SELECT 1 FROM kyc_submissions WHERE user_id=$1 AND level=1 AND status='approved' AND id_hash=$2", [u.id, sha256(body.bvn)]);
+    if (!bvnOk.rowCount) throw badRequest("bvn_mismatch", "Enter the same BVN you verified earlier");
+
+    const b64 = body.image.replace(/^data:image\/jpeg;base64,/, "");
+    const bytes = Buffer.from(b64, "base64");
+    if (bytes.length > SELFIE_MAX_BYTES) throw badRequest("image_too_large", "That photo is too large. Try again.");
+    if (!(bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)) throw badRequest("invalid_image", "Upload a JPEG photo taken with your camera");
+    const attempts = await db.query<{ n: string }>("SELECT count(*) AS n FROM selfie_checks WHERE user_id=$1 AND created_at > now() - interval '24 hours'", [u.id]);
+    const used = Number(attempts.rows[0]!.n);
+    if (used >= SELFIE_ATTEMPTS_PER_DAY) throw tooMany("Too many attempts today. Try again tomorrow or contact support.");
+    const hash = sha256(bytes.toString("base64"));
+    const reused = await db.query("SELECT 1 FROM selfie_checks WHERE image_sha256=$1 AND user_id <> $2", [hash, u.id]);
+    if (reused.rowCount) throw badRequest("photo_reused", "Take a new selfie with your camera");
+
+    const r = await face.checkSelfie({ bvn: body.bvn, imageB64: bytes.toString("base64") });
+    const reason = !r.liveness.faceDetected
+      ? "We couldn't see a face. Use good light and fill the oval with your face."
+      : r.liveness.multipleFaces
+        ? "Only you should be in the photo."
+        : !r.liveness.passed
+          ? "We couldn't confirm a live photo. Take the selfie yourself, not a photo of a screen or picture."
+          : !r.match?.matched
+            ? "Your selfie didn't match the photo on your BVN record. Try again in good light, without glasses or a hat."
+            : null;
+    const status = reason ? "failed" : "passed";
+    await db.query(
+      `INSERT INTO selfie_checks(user_id, image_enc, image_sha256, provider, provider_ref, liveness_passed, liveness_probability, face_detected, multiple_faces, match_confidence, matched, status, reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [u.id, deps.cipher.encrypt(bytes.toString("base64")), hash, face.name, r.providerRef, r.liveness.passed, r.liveness.probability, r.liveness.faceDetected, r.liveness.multipleFaces, r.match?.confidence ?? null, r.match?.matched ?? null, status, reason],
+    );
+    await audit(u.id, `kyc.selfie_${status}`, u.id, { liveness: r.liveness.probability, match: r.match?.confidence ?? null });
+    return { status, reason, attemptsLeft: Math.max(0, SELFIE_ATTEMPTS_PER_DAY - used - 1) };
+  });
+
   app.post("/v1/kyc/id", { preHandler: auth }, async (req, reply) => {
     const body = parse(
       z.object({
         idType: z.enum(["nin", "passport", "drivers_licence", "voters_card"]),
         idNumber: z.string().regex(/^[A-Za-z0-9]{6,20}$/),
-        selfieRef: z.string().max(200),
       }),
       req.body,
     );
     const u = await getUser(currentUser(req).id);
     if (!u) throw notFound();
     if (u.kyc_tier < 1) throw badRequest("tier1_required", "Verify your BVN first");
+    const selfie = (await db.query<{ id: string }>("SELECT id FROM selfie_checks WHERE user_id=$1 AND status='passed' ORDER BY created_at DESC LIMIT 1", [u.id])).rows[0];
+    if (!selfie) throw badRequest("selfie_required", "Take your selfie first");
     const pending = await db.query("SELECT 1 FROM kyc_submissions WHERE user_id=$1 AND level=2 AND status='pending'", [u.id]);
     if (pending.rowCount) throw conflict("kyc_pending", "Your ID is already under review");
     const s = await db.query<{ id: string }>(
       "INSERT INTO kyc_submissions(user_id, level, status, id_type, id_last4, id_hash, selfie_ref, provider) VALUES ($1,2,'pending',$2,$3,$4,$5,'manual') RETURNING id",
-      [u.id, body.idType, body.idNumber.slice(-4), sha256(body.idNumber.toUpperCase()), body.selfieRef],
+      [u.id, body.idType, body.idNumber.slice(-4), sha256(body.idNumber.toUpperCase()), selfie.id],
     );
     reply.status(202);
     return { submissionId: s.rows[0]!.id, status: "pending" };
@@ -534,7 +588,8 @@ export async function buildIdentity(deps: IdentityDeps) {
     const id = currentUser(req).id;
     const rows = await db.query("SELECT id, level, status, id_type, reason, created_at FROM kyc_submissions WHERE user_id=$1 ORDER BY created_at DESC LIMIT 10", [id]);
     const u = await getUser(id);
-    return { tier: u?.kyc_tier ?? 0, submissions: rows.rows };
+    const selfie = (await db.query<{ status: string; reason: string | null; created_at: Date }>("SELECT status, reason, created_at FROM selfie_checks WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1", [id])).rows[0];
+    return { tier: u?.kyc_tier ?? 0, submissions: rows.rows, selfie: selfie ? { status: selfie.status, reason: selfie.reason, at: selfie.created_at } : null };
   });
 
   // ---------- Admin ----------
@@ -579,8 +634,10 @@ export async function buildIdentity(deps: IdentityDeps) {
     const { status } = parse(z.object({ status: z.enum(["pending", "approved", "rejected"]).default("pending") }), req.query);
     const rows = await db.query(
       `SELECT k.id, k.user_id, k.level, k.status, k.id_type, k.id_last4, k.selfie_ref, k.reason, k.created_at,
-              u.first_name, u.last_name, u.email
+              u.first_name, u.last_name, u.email,
+              s.liveness_probability, s.match_confidence, s.provider AS selfie_provider
        FROM kyc_submissions k JOIN users u ON u.id = k.user_id
+       LEFT JOIN selfie_checks s ON s.id::text = k.selfie_ref
        WHERE k.status=$1 ORDER BY k.created_at ASC LIMIT 100`,
       [status],
     );
@@ -667,6 +724,17 @@ export async function buildIdentity(deps: IdentityDeps) {
       await c.query("INSERT INTO audit_log(actor_id, action, target, meta) VALUES ($1,'admin.roles_changed',$2,$3)", [actor, id, { from: adminRoles(u), to: roles }]);
     });
     return { ok: true };
+  });
+
+  /** The selfie photo for a reviewer. Every view is audited. */
+  app.get("/v1/admin/kyc/selfies/:id", perm("kyc.review"), async (req, reply) => {
+    const { id } = parse(z.object({ id: uuidSchema }), req.params);
+    if (!deps.cipher) throw new AppError(503, "selfie_unavailable", "Selfie checks are not configured");
+    const row = (await db.query<{ user_id: string; image_enc: string }>("SELECT user_id, image_enc FROM selfie_checks WHERE id=$1", [id])).rows[0];
+    if (!row) throw notFound("Selfie not found");
+    await audit(currentUser(req).id, "kyc.selfie_viewed", row.user_id, { selfieCheck: id });
+    reply.header("content-type", "image/jpeg").header("cache-control", "no-store, private");
+    return Buffer.from(deps.cipher.decrypt(row.image_enc), "base64");
   });
 
   app.get("/v1/admin/audit", perm("audit.read"), async () => {

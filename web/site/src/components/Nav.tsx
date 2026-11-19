@@ -31,7 +31,7 @@ export function Nav() {
           <a href="/#features">Features</a>
           <a href="/#rates">Rates</a>
           <a href="/#how">How it works</a>
-          <a href="/#faq">FAQ</a>
+          <a href="/help">Help</a>
         </nav>
         <a className="btn btn-primary" href="/#download">
           Get the app

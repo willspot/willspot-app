@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0 — 2026-11-19 — Phase 6: KYC selfie + liveness, help centre, PDF statements
+- **KYC selfie** (ADR-032):
+  - `POST /v1/kyc/selfie` runs liveness, then a face match to the BVN photo, through `FaceVerifier` (Dojah per docs; sandbox default; `FACE_PROVIDER`, `FACE_MATCH_THRESHOLD`);
+  - tier 2 needs a passed selfie, and reviewers see the scores and the photo (every view audited);
+  - app: guided selfie (camera with an oval guide, front-camera-only fallback, retry button).
+- **Help centre** (ADR-033): FAQ as an admin-editable config document seeded from `brand/faq.json`; website `/help` (search, topics, animations); in-app Help centre (offline, search); dashboard FAQ editor (drag to reorder, versioned).
+- **PDF statements** (ADR-034): `format=pdf` (pdf-lib) with a reference fingerprint; "Share PDF" in the app (share_plus + path_provider); PDF and CSV for staff on Users.
+- **CI:** removed npm/yarn/corepack from the runtime images (Trivy CVEs in the base image's npm); trivy-action pinned to a commit; the nats-server download is checksum-verified; failing tests show up as GitHub annotations; FAQ copies checked in mobile CI.
+- **Fixes:**
+  - the dashboard proxy now forwards JPEG and PDF as bytes;
+  - `sync-brand.mjs` no longer fails when run concurrently;
+  - the webhook-failure test waits for its record.
+- Tests: backend 155 → 165, Flutter 30 → 33, smoke 58 → 63.
+
 ## 0.5.0 — 2026-11-19 — Phase 5: statements, referrals, support; CI fixed; Kubernetes tested
 - **Statements** (ADR-029): `GET /v1/wallet/statements` (JSON/CSV, any asset, up to a year) built from ledger postings. App Statement screen; staff can export a customer's CSV from Users.
 - **Referral rewards** (ADR-028): referral codes, an optional code at sign-up, and an event-driven reward with per-referee idempotency, a monthly cap and a feature flag. App "Invite friends" screen.

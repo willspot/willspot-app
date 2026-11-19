@@ -1,5 +1,10 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../../core/api.dart';
 import '../../core/app_state.dart';
 import '../../core/money.dart';
 import '../../ui/motion.dart';
@@ -22,6 +27,8 @@ class _StatementScreenState extends State<StatementScreen> {
   String _asset = 'NGN';
   Map<String, dynamic>? _data;
   Object? _error;
+  bool _sharing = false;
+  final _shareKey = GlobalKey();
 
   static const _monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   String _ymd(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
@@ -47,6 +54,44 @@ class _StatementScreenState extends State<StatementScreen> {
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
+  }
+
+  /// Downloads the PDF, saves it to the app's temporary folder and opens the share sheet
+  /// (email, WhatsApp, Files…). The file is removed again when the screen closes.
+  Future<void> _sharePdf() async {
+    setState(() => _sharing = true);
+    final state = AppScope.read(context);
+    final last = DateTime(_month.year, _month.month + 1, 0);
+    final box = _shareKey.currentContext?.findRenderObject() as RenderBox?;
+    try {
+      final bytes = await state.api.getBytes('/v1/wallet/statements?from=${_ymd(_month)}&to=${_ymd(last)}&asset=$_asset&format=pdf');
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/${state.brand.name.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}-statement-$_asset-${_ymd(_month).substring(0, 7)}.pdf');
+      await file.writeAsBytes(bytes, flush: true);
+      _tempFiles.add(file);
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile(file.path, mimeType: 'application/pdf')],
+        subject: '${state.brand.name} statement ${_monthNames[_month.month - 1]} ${_month.year}',
+        // iPad needs an anchor for the share popover.
+        sharePositionOrigin: box == null ? null : box.localToGlobal(Offset.zero) & box.size,
+      ));
+    } on ApiException catch (e) {
+      if (mounted) showError(context, e);
+    } catch (_) {
+      if (mounted) showInfo(context, "Couldn't open sharing on this device.");
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
+  final _tempFiles = <File>[];
+
+  @override
+  void dispose() {
+    for (final f in _tempFiles) {
+      f.delete().catchError((_) => f);
+    }
+    super.dispose();
   }
 
   Widget _summary(BuildContext context, Map<String, dynamic> d) {
@@ -76,7 +121,15 @@ class _StatementScreenState extends State<StatementScreen> {
     final d = _data;
     final lines = ((d?['lines'] as List?) ?? const []).cast<Map<String, dynamic>>();
     return Scaffold(
-      appBar: AppBar(title: const Text('Statement')),
+      appBar: AppBar(title: const Text('Statement'), actions: [
+        Padding(
+          key: _shareKey,
+          padding: const EdgeInsets.only(right: 8),
+          child: _sharing
+              ? const Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+              : IconButton(icon: const Icon(Icons.ios_share_rounded), tooltip: 'Share PDF', onPressed: _data == null ? null : _sharePdf),
+        ),
+      ]),
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(padding: const EdgeInsets.all(16), children: [
@@ -133,7 +186,9 @@ class _StatementScreenState extends State<StatementScreen> {
                 ),
               ),
             const SizedBox(height: 12),
-            Text('Need an official copy (CSV) for a bank or embassy? Ask in Help & support.', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant), textAlign: TextAlign.center),
+            OutlinedButton.icon(onPressed: _sharing ? null : _sharePdf, icon: const Icon(Icons.picture_as_pdf_outlined), label: const Text('Share PDF statement')),
+            const SizedBox(height: 6),
+            Text('Each PDF carries a reference our team can check if a bank or embassy asks.', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant), textAlign: TextAlign.center),
           ],
         ]),
       ),

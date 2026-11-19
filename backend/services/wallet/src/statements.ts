@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { statementFingerprint, statementPdf } from "./statement-pdf.js";
 import { badRequest, currentUser, fromMinor, isAsset, parse, requirePermission, toCsv, uuidSchema, type Asset, type Db } from "@willspot/common";
 
 /**
@@ -13,7 +14,7 @@ export const statementQuery = z.object({
   from: dateSchema,
   to: dateSchema,
   asset: z.string().default("NGN"),
-  format: z.enum(["json", "csv"]).default("json"),
+  format: z.enum(["json", "csv", "pdf"]).default("json"),
 });
 
 export interface StatementLine {
@@ -100,10 +101,21 @@ export function statementCsv(s: Statement, holder: string): string {
   return `${toCsv(head)}\n${toCsv(s.lines.map((l) => ({ Date: l.date, Reference: l.reference, Type: l.type, Description: l.description, Debit: l.debit, Credit: l.credit, Balance: l.balance })))}`;
 }
 
-export function registerStatementRoutes(app: FastifyInstance, db: Db, auth: (req: FastifyRequest) => Promise<void>, holderName: (userId: string) => Promise<string>) {
+export function registerStatementRoutes(app: FastifyInstance, db: Db, auth: (req: FastifyRequest) => Promise<void>, holderName: (userId: string) => Promise<string>, brandName = "WillSpot") {
   const send = async (req: FastifyRequest, reply: import("fastify").FastifyReply, userId: string) => {
     const q = parse(statementQuery, req.query);
     const s = await buildStatement(db, userId, q);
+    if (q.format === "pdf") {
+      const holder = await holderName(userId);
+      const va = (await db.query<{ account_number: string }>("SELECT account_number FROM virtual_accounts WHERE user_id=$1", [userId])).rows[0];
+      const fp = statementFingerprint(s, userId);
+      const pdf = await statementPdf(s, { brand: brandName, holder, account: va?.account_number.slice(-4) }, fp);
+      reply
+        .header("content-type", "application/pdf")
+        .header("content-disposition", `attachment; filename="statement-${s.asset}-${s.from}-to-${s.to}.pdf"`)
+        .header("x-statement-ref", fp);
+      return reply.send(Buffer.from(pdf));
+    }
     if (q.format === "csv") {
       reply.header("content-type", "text/csv; charset=utf-8").header("content-disposition", `attachment; filename="statement-${s.asset}-${s.from}-to-${s.to}.csv"`);
       return statementCsv(s, await holderName(userId));

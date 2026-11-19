@@ -98,6 +98,61 @@ describe("statements", () => {
   });
 });
 
+describe("PDF statements", () => {
+  const hex = (t: string) => Buffer.from(t, "latin1").toString("hex").toUpperCase();
+  /** Page content streams are Flate-compressed; inflate them to search the drawn text. */
+  const pageText = async (pdf: Buffer) => {
+    const { inflateSync } = await import("node:zlib");
+    const raw = pdf.toString("latin1");
+    let out = "";
+    for (const m of raw.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
+      try {
+        out += inflateSync(Buffer.from(m[1]!, "latin1")).toString("latin1");
+      } catch {
+        // not a Flate stream
+      }
+    }
+    return out.toUpperCase();
+  };
+  it("returns a real A4 PDF with the summary, a reference and safe text", async () => {
+    const u = await user({ firstName: "Adébáyọ̀", lastName: "Ọlá 💸" });
+    await deposit(u, "1500.75");
+    const today = new Date(Date.now() + 3600_000).toISOString().slice(0, 10);
+    const r = await call("GET", `/v1/wallet/statements?from=${today}&to=${today}&format=pdf`, u.token);
+    expect(r.statusCode).toBe(200);
+    expect(r.headers["content-type"]).toBe("application/pdf");
+    expect(r.headers["content-disposition"]).toContain(".pdf");
+    expect(String(r.headers["x-statement-ref"])).toMatch(/^[0-9A-F]{16}$/);
+    const bytes = r.rawPayload;
+    expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+    const { PDFDocument } = await import("pdf-lib");
+    const doc = await PDFDocument.load(bytes);
+    expect(doc.getPageCount()).toBe(1);
+    expect(doc.getPage(0).getSize()).toEqual({ width: 595.28, height: 841.89 });
+    const raw = await pageText(bytes);
+    expect(raw).toContain(hex("Account statement"));
+    expect(raw).toContain(hex("Adebayo Ola ?")); // accents dropped, emoji replaced — no crash
+    expect(raw).toContain(hex("NGN 1,500.75"));
+  });
+
+  it("paginates long statements and keeps the same reference for the same data", async () => {
+    const u = await user();
+    for (let i = 0; i < 45; i++) await deposit(u, `${100 + i}`);
+    const today = new Date(Date.now() + 3600_000).toISOString().slice(0, 10);
+    const a = await call("GET", `/v1/wallet/statements?from=${today}&to=${today}&format=pdf`, u.token);
+    const b = await call("GET", `/v1/wallet/statements?from=${today}&to=${today}&format=pdf`, u.token);
+    const { PDFDocument } = await import("pdf-lib");
+    expect((await PDFDocument.load(a.rawPayload)).getPageCount()).toBeGreaterThan(1);
+    expect(a.headers["x-statement-ref"]).toBe(b.headers["x-statement-ref"]);
+    expect(await pageText(a.rawPayload)).toContain(hex("Page 2 of"));
+  });
+
+  it("makes any text printable with the built-in fonts", async () => {
+    const { pdfSafe } = await import("../src/statement-pdf.js");
+    expect(pdfSafe("₦5,000 → Ọlá’s “card” — ok • 中文")).toBe("NGN 5,000 -> Ola's \"card\" - ok * ??");
+  });
+});
+
 describe("referral rewards", () => {
   it("pays the referrer once, after a verified friend's first qualifying deposit", async () => {
     const referrer = await user();
